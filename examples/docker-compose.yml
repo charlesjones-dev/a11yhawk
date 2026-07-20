@@ -1,0 +1,38 @@
+# Run a11yhawk in server mode with Docker Compose.
+#
+#   docker compose -f examples/docker-compose.yml up
+#
+# Then POST a scan:
+#   curl -s localhost:4000/scans -H 'content-type: application/json' \
+#     -d '{"url":"https://example.com"}'
+#
+# Jobs live in memory only and are lost on restart; persistence is your job.
+
+services:
+  a11yhawk:
+    # Pull the published image...
+    image: ghcr.io/charlesjones-dev/a11yhawk:latest
+    # ...or build it from this repo instead (comment out `image:` above):
+    # build:
+    #   context: ..
+    ports:
+      - '4000:4000'
+    environment:
+      # Listen port inside the container (matches the published port above).
+      A11YHAWK_PORT: '4000'
+      # Max concurrent scans (clamped 1-10). Others queue FIFO.
+      A11YHAWK_CONCURRENCY: '2'
+      # Seconds a finished job is retained before eviction (default 3600).
+      # A11YHAWK_JOB_TTL_SECONDS: '3600'
+      # Require `Authorization: Bearer <token>` on every endpoint except
+      # /healthz. Uncomment and set a real secret to lock the server down.
+      # A11YHAWK_AUTH_TOKEN: 'change-me'
+      # Permit scanning private/internal targets. Only enable on a trusted
+      # network; it widens which addresses the SSRF guard accepts.
+      # A11YHAWK_ALLOW_PRIVATE: 'true'
+      # Disable the Chromium sandbox. Needed on some hosts (e.g. Railway) that
+      # cannot grant the required kernel capabilities.
+      # A11YHAWK_DISABLE_SANDBOX: 'true'
+    # Reap zombie browser/Lighthouse subprocesses and forward signals cleanly.
+    init: true
+    restart: unless-stopped

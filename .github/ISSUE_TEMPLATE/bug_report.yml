@@ -1,0 +1,96 @@
+name: Bug report
+description: Report a defect in a11yhawk (the scan engine, CLI, server, or Docker image).
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Before you start:
+
+        - **Never paste API keys**, bearer tokens, or other secrets into this form.
+        - Scan reports and logs can contain **content from the page you scanned**. Redact anything sensitive before pasting.
+        - If you think you have found a security vulnerability, do not open a public issue. Report it privately via a [security advisory](https://github.com/charlesjones-dev/a11yhawk/security/advisories/new).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the actual behavior, including any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The exact command or code snippet you ran, and the URL you scanned if it is shareable. A minimal repro is the fastest path to a fix.
+      placeholder: |
+        URL (if shareable): https://...
+        Command: npx a11yhawk https://... --no-llm
+        or code:
+          import { scan } from 'a11yhawk';
+          await scan('https://...');
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How are you running a11yhawk?
+      options:
+        - Library (import into Node)
+        - CLI (npx a11yhawk)
+        - Server (a11yhawk serve)
+        - Docker image
+    validations:
+      required: true
+  - type: dropdown
+    id: analysis-mode
+    attributes:
+      label: Analysis mode
+      options:
+        - LLM mode (bring-your-own-key)
+        - Lighthouse-only (--no-llm)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: a11yhawk version
+      description: Output of `npm ls a11yhawk`, or the image tag if you are using Docker.
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`. Leave blank if you are using the Docker image.
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. macOS 15.1, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: a11yhawk doctor output
+      description: Run `npx a11yhawk doctor` and paste the output. It checks the Chromium install, the Lighthouse CLI, and your key configuration.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Any relevant log output. Re-run with `--verbose` for more detail. Remember to redact page content and secrets.
+      render: text
+    validations:
+      required: false

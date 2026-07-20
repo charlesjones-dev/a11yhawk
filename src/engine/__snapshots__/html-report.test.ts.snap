@@ -1,0 +1,564 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderHtmlReport > matches the snapshot for a fixed fixture 1`] = `
+"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="generator" content="A11yHawk" />
+    <title>Pricing - Example - A11yHawk accessibility report</title>
+    <style>
+:root {
+  --bg: #16130e;
+  --card: #211c15;
+  --tile: #2b251b;
+  --pre: #12100b;
+  --border: #3b3427;
+  --ring-track: #332c20;
+  --ink: #f4eedf;
+  --ink-2: #cbc0a8;
+  --ink-3: #aba088;
+  --accent: #f2a24e;
+  --accent-dim: rgba(242, 162, 78, 0.45);
+  --good: #5bc48d;
+  --medium: #e6c64f;
+  --high: #f08a3d;
+  --critical: #f0706f;
+  --low: #78adf0;
+  --badge-ink: #16130e;
+  --radius: 10px;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { width: 100%; max-width: 880px; margin: 0 auto; padding: 0 24px; }
+.mono { font-family: var(--mono); }
+a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 10;
+  background: var(--card); color: var(--ink); padding: 10px 16px; border-radius: 8px;
+  border: 1px solid var(--border); text-decoration: none; transition: top 0.15s ease;
+}
+.skip-link:focus { top: 12px; }
+
+.card {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+/* Signature: corner brackets framing every card (top-left + bottom-right). */
+.card::before, .card::after {
+  content: ''; position: absolute; width: 14px; height: 14px;
+  border-color: var(--accent-dim); border-style: solid; border-width: 0; pointer-events: none;
+}
+.card::before { top: 7px; left: 7px; border-top-width: 2px; border-left-width: 2px; }
+.card::after { bottom: 7px; right: 7px; border-bottom-width: 2px; border-right-width: 2px; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent); margin: 0 0 6px;
+}
+.section-title { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 16px; }
+.section { padding-top: 40px; }
+.section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.section-head .section-title { margin: 0; }
+.count-pill {
+  font-family: var(--mono); font-size: 14px; color: var(--ink-2);
+  background: var(--tile); border: 1px solid var(--border); border-radius: 999px;
+  padding: 1px 10px; margin-left: 6px; vertical-align: middle;
+}
+.fine-print { color: var(--ink-3); font-size: 13px; margin: 12px 0 0; }
+
+/* Header */
+header.wrap { padding-top: 56px; }
+.brand { font-family: var(--mono); font-weight: 600; letter-spacing: 0.04em; color: var(--ink-2); font-size: 14px; }
+.brand b { color: var(--accent); font-weight: 700; }
+.report-title { font-size: 30px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 24px; overflow-wrap: anywhere; }
+.config-card { padding: 20px 24px; }
+.config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin: 0; }
+.field { margin: 0; }
+dt { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 3px; }
+dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.config-grid dd a { overflow-wrap: anywhere; }
+
+/* Score panel */
+.score-card { display: flex; gap: 32px; align-items: center; flex-wrap: wrap; }
+.ring-wrap { position: relative; width: 176px; height: 176px; flex: 0 0 auto; }
+.ring-track { stroke: var(--ring-track); }
+.ring-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; line-height: 1;
+}
+.score-num { font-size: 46px; font-weight: 700; letter-spacing: -0.03em; }
+.score-den { font-size: 14px; color: var(--ink-3); margin-top: 2px; }
+.score-band { font-size: 12px; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+.lh-badge {
+  position: absolute; top: -2px; right: -6px;
+  background: var(--tile); border: 1px solid var(--border); border-radius: 999px;
+  width: 52px; height: 52px; display: flex; align-items: center; justify-content: center;
+  text-align: center; font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--ink);
+}
+.lh-badge em { display: block; font-style: normal; font-size: 9px; letter-spacing: 0.08em; color: var(--accent); }
+.breakdown { flex: 1 1 300px; min-width: 260px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tile {
+  background: var(--tile); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 10px 12px; text-align: center; border-top: 3px solid var(--border);
+}
+.tile-count { display: block; font-size: 26px; font-weight: 700; line-height: 1; }
+.tile-label { display: block; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.tile-critical { border-top-color: var(--critical); } .tile-critical .tile-count { color: var(--critical); }
+.tile-high { border-top-color: var(--high); } .tile-high .tile-count { color: var(--high); }
+.tile-medium { border-top-color: var(--medium); } .tile-medium .tile-count { color: var(--medium); }
+.tile-low { border-top-color: var(--low); } .tile-low .tile-count { color: var(--low); }
+.progress-wrap { margin-top: 18px; }
+.progress {
+  height: 8px; background: var(--tile); border: 1px solid var(--border);
+  border-radius: 999px; overflow: hidden;
+}
+.progress-fill { height: 100%; width: 0; background: var(--good); border-radius: 999px; transition: width 0.25s ease; }
+.progress-text { font-size: 12px; color: var(--ink-2); margin: 8px 0 0; }
+
+/* Issues */
+.sort-control { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.sort-control label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.sort-control select {
+  background: var(--tile); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px;
+}
+.issue-list { display: flex; flex-direction: column; gap: 10px; }
+.issue { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.issue-summary {
+  display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer;
+  list-style: none; user-select: none;
+}
+.issue-summary::-webkit-details-marker { display: none; }
+.chevron {
+  flex: 0 0 auto; width: 8px; height: 8px; border-right: 2px solid var(--ink-3);
+  border-bottom: 2px solid var(--ink-3); transform: rotate(-45deg); transition: transform 0.2s ease;
+}
+.issue[open] .chevron { transform: rotate(45deg); }
+.sev-badge {
+  flex: 0 0 auto; font-family: var(--mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--badge-ink);
+  border-radius: 6px; padding: 3px 9px;
+}
+.sev-critical { background: var(--critical); } .sev-high { background: var(--high); }
+.sev-medium { background: var(--medium); } .sev-low { background: var(--low); }
+.issue-title { flex: 1 1 auto; font-weight: 550; min-width: 0; }
+.wcag-chip {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+  background: var(--tile); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px;
+}
+.wcag-level { color: var(--accent); font-weight: 700; }
+.resolve {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--ink-2); cursor: pointer; white-space: nowrap;
+}
+.resolve input { width: 16px; height: 16px; accent-color: var(--good); cursor: pointer; }
+.issue.is-resolved .issue-title { text-decoration: line-through; color: var(--ink-3); }
+.issue.is-resolved .issue-summary { opacity: 0.62; }
+.issue-body { padding: 4px 18px 20px; border-top: 1px solid var(--border); }
+.issue-body dl { display: grid; gap: 14px; margin: 16px 0 0; }
+.issue-body dt { color: var(--accent); }
+.issue-body dd { color: var(--ink-2); }
+.priority { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+pre.code {
+  background: var(--pre); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; margin: 0; overflow-x: auto; font-family: var(--mono);
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+}
+pre.code code { font-family: inherit; }
+
+/* Screenshot */
+.shot-card { padding: 16px; }
+.shot { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border); }
+
+/* Reference */
+.fold { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 10px; }
+.fold > summary {
+  cursor: pointer; padding: 14px 18px; font-weight: 600; list-style: none;
+  display: flex; align-items: center; gap: 8px;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before {
+  content: ''; width: 8px; height: 8px; border-right: 2px solid var(--ink-3);
+  border-bottom: 2px solid var(--ink-3); transform: rotate(-45deg); transition: transform 0.2s ease;
+}
+.fold[open] > summary::before { transform: rotate(45deg); }
+.passed-list { margin: 0; padding: 4px 18px 18px 36px; color: var(--ink-2); }
+.passed-list li { margin: 6px 0; }
+.passed-crit { color: var(--good); margin-right: 6px; }
+.table-scroll { overflow-x: auto; padding: 0 4px 4px; }
+table.coverage { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.coverage th, table.coverage td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+table.coverage th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+table.coverage td { color: var(--ink-2); }
+.status { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; color: var(--badge-ink); }
+.status-pass { background: var(--good); }
+.status-fail { background: var(--critical); }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 40px 24px; }
+.empty-title { font-size: 18px; font-weight: 650; color: var(--good); margin: 0; }
+
+/* Footer */
+.site-footer { margin-top: 56px; padding-top: 28px; padding-bottom: 56px; border-top: 1px solid var(--border); }
+.footer-stats { display: flex; flex-wrap: wrap; gap: 12px 40px; }
+.fstat { display: flex; flex-direction: column; gap: 3px; }
+.fstat-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.fstat-val { font-size: 16px; color: var(--ink); }
+.footer-credit { color: var(--ink-3); font-size: 13px; margin: 22px 0 0; }
+
+@media (max-width: 620px) {
+  .config-grid { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .score-card { justify-content: center; }
+  .section-head { flex-direction: column; align-items: flex-start; }
+  .report-title { font-size: 25px; }
+  /* Stack the summary: chevron + badge, then the title, then chip + checkbox. */
+  .issue-summary { flex-wrap: wrap; row-gap: 8px; }
+  .issue-title { flex-basis: 100%; }
+  .resolve { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+  </head>
+  <body data-scan-key="https://example.com/pricing|2026-07-19T14:30:00.000Z">
+    <a class="skip-link" href="#main">Skip to report</a>
+    <header class="wrap">
+      <div class="brand" aria-hidden="true">a11y<b>hawk</b></div>
+      <p class="eyebrow">Accessibility scan report</p>
+      <h1 class="report-title">Pricing - Example</h1>
+      <div class="card config-card">
+        <h2 class="visually-hidden">Scan configuration</h2>
+        <dl class="config-grid">
+          <div class="field"><dt>Scanned URL</dt><dd><a href="https://example.com/pricing" rel="noreferrer noopener">https://example.com/pricing</a></dd></div>
+          <div class="field"><dt>Model</dt><dd><span class="mono">anthropic/claude-sonnet-4.5</span></dd></div>
+          <div class="field"><dt>Standard</dt><dd>WCAG 2.1 - AA</dd></div>
+          <div class="field"><dt>Scan date</dt><dd>Jul 19, 2026 at 14:30 UTC</dd></div>
+        </dl>
+        <p class="fine-print">A11yHawk vX.Y.Z &middot; anthropic/claude-sonnet-4.5</p>
+      </div>
+    </header>
+    <main id="main">
+      <section class="wrap section" aria-labelledby="score-h">
+      <p class="eyebrow">Result</p>
+      <h2 id="score-h" class="section-title">Score summary</h2>
+      <div class="card score-card">
+        <div class="ring-wrap">
+          <div class="ring" role="img" aria-label="Overall accessibility score 62 out of 100, rated needs work">
+            <svg viewBox="0 0 128 128" width="176" height="176" focusable="false" aria-hidden="true">
+              <circle class="ring-track" cx="64" cy="64" r="54" fill="none" stroke-width="12" />
+              <circle
+                class="ring-arc"
+                cx="64"
+                cy="64"
+                r="54"
+                fill="none"
+                stroke-width="12"
+                stroke-linecap="round"
+                stroke="var(--high)"
+                stroke-dasharray="339.29"
+                stroke-dashoffset="128.93"
+                transform="rotate(-90 64 64)"
+              />
+            </svg>
+            <div class="ring-center" aria-hidden="true">
+              <span class="score-num mono" style="color: var(--high)">62</span>
+              <span class="score-den mono">/ 100</span>
+              <span class="score-band">Needs work</span>
+            </div>
+          </div>
+          <span class="lh-badge" role="img" aria-label="Lighthouse score 78 out of 100">
+            <span aria-hidden="true"><em>LH</em>78</span>
+          </span>
+        </div>
+        <div class="breakdown">
+          <div class="tiles">
+          <div class="tile tile-critical">
+            <span class="tile-count mono">1</span>
+            <span class="tile-label">Critical</span>
+          </div>
+          <div class="tile tile-high">
+            <span class="tile-count mono">1</span>
+            <span class="tile-label">High</span>
+          </div>
+          <div class="tile tile-medium">
+            <span class="tile-count mono">1</span>
+            <span class="tile-label">Medium</span>
+          </div>
+          <div class="tile tile-low">
+            <span class="tile-count mono">0</span>
+            <span class="tile-label">Low</span>
+          </div>
+          </div>
+          <div class="progress-wrap">
+            <div
+              id="progress"
+              class="progress"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="3"
+              aria-valuenow="0"
+              aria-label="Issues marked resolved"
+            >
+              <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <p id="progress-text" class="progress-text mono">0 of 3 resolved</p>
+          </div>
+        </div>
+      </div>
+    </section>
+      <section class="wrap section" aria-labelledby="issues-h">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Findings</p>
+          <h2 id="issues-h" class="section-title">Issues <span class="count-pill">3</span></h2>
+        </div>
+        <div class="sort-control">
+          <label for="sort">Sort by</label>
+          <select id="sort" aria-label="Sort issues">
+            <option value="severity">Severity</option>
+            <option value="wcag">WCAG criterion</option>
+          </select>
+        </div>
+      </div>
+      <div id="issue-list" class="issue-list">
+      <details
+        class="issue"
+        data-id="issue-1"
+        data-rank="0"
+        data-wcag="1.1.1"
+        data-index="0"
+      >
+        <summary class="issue-summary">
+          <span class="chevron" aria-hidden="true"></span>
+          <span class="sev-badge sev-critical">Critical</span>
+          <span class="issue-title">Image missing alt text &lt;img src=x onerror=alert(1)&gt;</span>
+          <span class="wcag-chip">1.1.1 Non-text Content<span class="wcag-level">A</span></span>
+          <label class="resolve">
+            <input
+              type="checkbox"
+              class="js-resolve"
+              data-id="issue-1"
+              aria-label="Mark &quot;Image missing alt text &lt;img src=x onerror=alert(1)&gt;&quot; as resolved"
+            />
+            <span aria-hidden="true">Resolved</span>
+          </label>
+        </summary>
+        <div class="issue-body"><dl><div class="field"><dt>Location</dt><dd><span class="mono">main &gt; img.logo</span></dd></div><div class="field"><dt>Pattern detected</dt><dd><span class="mono">image-alt</span></dd></div><div class="field"><dt>Code context</dt><dd><pre class="code"><code>&lt;img class=&quot;logo&quot; src=&quot;/logo.png&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</code></pre></dd></div><div class="field"><dt>Impact</dt><dd>Screen reader users receive no description of this image.</dd></div><div class="field"><dt>User impact</dt><dd>Blind users cannot tell what the logo represents.</dd></div><div class="field"><dt>Recommendation</dt><dd>Add a descriptive alt attribute.</dd></div><div class="field"><dt>Remediation</dt><dd>Set alt=&quot;Acme Corp home&quot; on the logo image.</dd></div><div class="field"><dt>Fix priority</dt><dd><span class="priority">Immediate</span></dd></div></dl></div>
+      </details>
+      <details
+        class="issue"
+        data-id="issue-2"
+        data-rank="1"
+        data-wcag="3.3.2"
+        data-index="1"
+      >
+        <summary class="issue-summary">
+          <span class="chevron" aria-hidden="true"></span>
+          <span class="sev-badge sev-high">High</span>
+          <span class="issue-title">Form control has no label</span>
+          <span class="wcag-chip">3.3.2<span class="wcag-level">A</span></span>
+          <label class="resolve">
+            <input
+              type="checkbox"
+              class="js-resolve"
+              data-id="issue-2"
+              aria-label="Mark &quot;Form control has no label&quot; as resolved"
+            />
+            <span aria-hidden="true">Resolved</span>
+          </label>
+        </summary>
+        <div class="issue-body"><dl><div class="field"><dt>Location</dt><dd><span class="mono">form#search input[type=text]</span></dd></div><div class="field"><dt>Pattern detected</dt><dd><span class="mono">label</span></dd></div><div class="field"><dt>Code context</dt><dd><pre class="code"><code>&lt;input type=&quot;text&quot; name=&quot;q&quot;&gt;</code></pre></dd></div><div class="field"><dt>Impact</dt><dd>The search field is announced only as &quot;edit text&quot;.</dd></div><div class="field"><dt>User impact</dt><dd>Users relying on assistive tech cannot identify the field.</dd></div><div class="field"><dt>Recommendation</dt><dd>Associate a visible label with the input.</dd></div><div class="field"><dt>Remediation</dt><dd>Add &lt;label for=&quot;q&quot;&gt;Search&lt;/label&gt;.</dd></div><div class="field"><dt>Fix priority</dt><dd><span class="priority">High Priority</span></dd></div></dl></div>
+      </details>
+      <details
+        class="issue"
+        data-id="issue-3"
+        data-rank="2"
+        data-wcag="2.4.4"
+        data-index="2"
+      >
+        <summary class="issue-summary">
+          <span class="chevron" aria-hidden="true"></span>
+          <span class="sev-badge sev-medium">Medium</span>
+          <span class="issue-title">Ambiguous link text</span>
+          <span class="wcag-chip">2.4.4 Link Purpose (In Context)<span class="wcag-level">A</span></span>
+          <label class="resolve">
+            <input
+              type="checkbox"
+              class="js-resolve"
+              data-id="issue-3"
+              aria-label="Mark &quot;Ambiguous link text&quot; as resolved"
+            />
+            <span aria-hidden="true">Resolved</span>
+          </label>
+        </summary>
+        <div class="issue-body"><dl><div class="field"><dt>Location</dt><dd><span class="mono">footer a.more</span></dd></div><div class="field"><dt>Pattern detected</dt><dd><span class="mono">link-name</span></dd></div><div class="field"><dt>Impact</dt><dd>Links labeled &quot;click here&quot; lack context out of flow.</dd></div><div class="field"><dt>User impact</dt><dd>Screen reader users navigating by links get no destination cue.</dd></div><div class="field"><dt>Recommendation</dt><dd>Use descriptive link text.</dd></div><div class="field"><dt>Remediation</dt><dd>Replace &quot;click here&quot; with the destination name.</dd></div><div class="field"><dt>Fix priority</dt><dd><span class="priority">Medium Priority</span></dd></div></dl></div>
+      </details>
+      </div>
+    </section>
+      <section class="wrap section" aria-labelledby="shot-h">
+      <p class="eyebrow">Evidence</p>
+      <h2 id="shot-h" class="section-title">Annotated screenshot</h2>
+      <div class="card shot-card">
+        <img class="shot" src="data:image/jpeg;base64,/9j/4AAQSkZJRgAB" alt="Screenshot of https://example.com/pricing with detected accessibility issues outlined" loading="lazy" />
+        <p class="fine-print">Colored boxes mark where detected issues appear on the captured page.</p>
+      </div>
+    </section>
+      <section class="wrap section" aria-labelledby="ref-h">
+      <p class="eyebrow">Reference</p>
+      <h2 id="ref-h" class="section-title">Passed checks and WCAG coverage</h2>
+      <details class="fold">
+          <summary>Passed checks <span class="count-pill">1</span></summary>
+          <ul class="passed-list">
+            <li><span class="mono passed-crit">1.4.3</span> Text meets minimum contrast requirements.</li>
+          </ul>
+        </details>
+      <details class="fold">
+          <summary>WCAG coverage <span class="count-pill">3</span></summary>
+          <div class="table-scroll">
+            <table class="coverage">
+              <caption class="visually-hidden">WCAG criteria coverage</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Criterion</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Level</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+            <tr>
+              <td class="mono">1.1.1</td>
+              <td>Non-text Content</td>
+              <td>A</td>
+              <td><span class="status status-fail">Failed</span></td>
+            </tr>
+            <tr>
+              <td class="mono">1.4.3</td>
+              <td>Contrast (Minimum)</td>
+              <td>AA</td>
+              <td><span class="status status-pass">Passed</span></td>
+            </tr>
+            <tr>
+              <td class="mono">2.4.4</td>
+              <td>Link Purpose (In Context)</td>
+              <td>A</td>
+              <td><span class="status status-fail">Failed</span></td>
+            </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+    </section>
+    </main>
+    <footer class="wrap site-footer">
+      <div class="footer-stats">
+        <div class="fstat"><span class="fstat-label">Scan duration</span><span class="fstat-val mono">8.3 s</span></div>
+        <div class="fstat"><span class="fstat-label">Tokens (in / out)</span><span class="fstat-val mono">12,345 / 6,789</span></div>
+        <div class="fstat"><span class="fstat-label">Total tokens</span><span class="fstat-val mono">19,134</span></div>
+        <div class="fstat"><span class="fstat-label">Estimated cost</span><span class="fstat-val mono">$0.0123</span></div>
+      </div>
+      <p class="footer-credit">Generated by <a href="https://github.com/charlesjones-dev/a11yhawk" rel="noreferrer noopener">A11yHawk</a> vX.Y.Z</p>
+    </footer>
+    <script>
+(function () {
+  var root = document.querySelector('[data-scan-key]');
+  if (!root) return;
+  var storeKey = 'a11yhawk:resolved:' + root.getAttribute('data-scan-key');
+  var list = document.getElementById('issue-list');
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.js-resolve'));
+  var total = boxes.length;
+
+  function load() {
+    try {
+      var raw = window.localStorage.getItem(storeKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function save(ids) {
+    try {
+      window.localStorage.setItem(storeKey, JSON.stringify(ids));
+    } catch (e) {
+      /* storage may be blocked on file://; resolution state is best-effort */
+    }
+  }
+  function apply(box) {
+    var row = box.closest('.issue');
+    if (row) row.classList.toggle('is-resolved', box.checked);
+  }
+  function update() {
+    var done = boxes.filter(function (b) { return b.checked; });
+    var pct = total ? Math.round((done.length / total) * 100) : 0;
+    var fill = document.getElementById('progress-fill');
+    var text = document.getElementById('progress-text');
+    var bar = document.getElementById('progress');
+    if (fill) fill.style.width = pct + '%';
+    if (text) text.textContent = done.length + ' of ' + total + ' resolved';
+    if (bar) bar.setAttribute('aria-valuenow', String(done.length));
+  }
+
+  var saved = load();
+  boxes.forEach(function (box) {
+    if (saved.indexOf(box.getAttribute('data-id')) !== -1) box.checked = true;
+    apply(box);
+    box.addEventListener('change', function () {
+      apply(box);
+      save(boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute('data-id'); }));
+      update();
+    });
+  });
+  // Keep clicks on the resolve control from toggling the issue disclosure.
+  Array.prototype.slice.call(document.querySelectorAll('.resolve')).forEach(function (el) {
+    el.addEventListener('click', function (e) { e.stopPropagation(); });
+  });
+  update();
+
+  var sort = document.getElementById('sort');
+  if (sort && list) {
+    sort.addEventListener('change', function () {
+      var rows = Array.prototype.slice.call(list.querySelectorAll('.issue'));
+      rows.sort(function (a, b) {
+        if (sort.value === 'wcag') {
+          return (a.getAttribute('data-wcag') || '~').localeCompare(b.getAttribute('data-wcag') || '~', undefined, { numeric: true });
+        }
+        return (Number(a.getAttribute('data-rank')) - Number(b.getAttribute('data-rank'))) ||
+          (Number(a.getAttribute('data-index')) - Number(b.getAttribute('data-index')));
+      });
+      rows.forEach(function (r) { list.appendChild(r); });
+    });
+  }
+})();
+</script>
+  </body>
+</html>
+"
+`;

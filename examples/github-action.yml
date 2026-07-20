@@ -1,0 +1,71 @@
+# Copy-paste GitHub Actions job that runs a11yhawk as a CI accessibility gate.
+#
+# This is a TEMPLATE, not an active workflow. Copy it into your own repository
+# under .github/workflows/ (for example .github/workflows/accessibility.yml) and
+# edit the URL, threshold, and triggers to suit your project.
+#
+# The flags below follow the a11yhawk CLI spec, but `npx a11yhawk --help` is the
+# authoritative, version-matched flag list - check it if a flag behaves
+# unexpectedly.
+
+name: Accessibility
+
+on:
+  # Run on pull requests and on pushes to the default branch. Adjust to taste.
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  a11y-scan:
+    runs-on: ubuntu-latest
+    steps:
+      # Check out your repository (only needed if you scan a locally served build).
+      - uses: actions/checkout@v4
+
+      # Node 22 LTS. a11yhawk requires Node >= 20.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Install a11yhawk so its binary is available. This puts `a11yhawk` on PATH,
+      # and the `npx a11yhawk` calls below resolve to it without re-downloading.
+      # Alternatively, drop this step and let `npx a11yhawk` fetch it on demand.
+      - run: npm install -g a11yhawk
+
+      # Download the Chromium build Playwright drives, plus its system libraries.
+      # `--with-deps` installs the OS packages Chromium needs on the runner.
+      - run: npx playwright install chromium --with-deps
+
+      # Run the scan in Lighthouse-only mode (fast, free, no API key). Fail the
+      # job if the accessibility score is below 80, and write an HTML report.
+      # Point the URL at your deployed or preview environment.
+      - run: >
+          npx a11yhawk https://staging.example.com
+          --no-llm
+          --fail-below 80
+          --format html
+          --output ./a11y-report
+
+      # Upload the report directory as a build artifact, even when the gate fails,
+      # so you can open the HTML report from the workflow run.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-report
+          path: ./a11y-report
+# -----------------------------------------------------------------------------
+# LLM-mode variant. Adds full AI analysis against every WCAG criterion. It is
+# slower (minutes) and costs tokens on your key. Store the key as a repository
+# secret named A11YHAWK_API_KEY (Settings -> Secrets and variables -> Actions),
+# then replace the Lighthouse-only run step above with the one below. The CLI
+# reads the key from the environment.
+#
+#     - run: >
+#         npx a11yhawk https://staging.example.com
+#         --fail-below 80
+#         --format html
+#         --output ./a11y-report
+#       env:
+#         A11YHAWK_API_KEY: ${{ secrets.A11YHAWK_API_KEY }}
+# -----------------------------------------------------------------------------

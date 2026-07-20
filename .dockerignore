@@ -1,0 +1,24 @@
+# Rebuilt inside the image; never copy host artifacts in.
+node_modules
+dist
+
+# VCS and CI metadata are not needed in the build context.
+.git
+.gitignore
+.github
+
+# Docs and local scan outputs bloat the context without helping the build.
+docs
+examples/output
+a11yhawk-output
+
+# Local tooling / editor noise.
+coverage
+*.log
+.DS_Store
+.vscode
+.idea
+
+# The image is built from the Dockerfile itself, not from copies of it.
+Dockerfile
+.dockerignore
