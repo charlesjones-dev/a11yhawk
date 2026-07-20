@@ -1,0 +1,8 @@
+docs/*
+node_modules/
+dist/
+*.tgz
+.env
+.env.*
+a11yhawk-output/
+.DS_Store

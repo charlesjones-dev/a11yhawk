@@ -1,0 +1,35 @@
+{
+  "name": "a11yhawk",
+  "version": "0.0.2",
+  "description": "Open-source, self-hostable web accessibility scan engine: Playwright capture, Lighthouse audits, and BYOK LLM analysis producing structured WCAG reports. This version is a name-reserving stub; the engine ships in upcoming releases.",
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "wcag",
+    "lighthouse",
+    "playwright",
+    "scanner",
+    "audit",
+    "ci"
+  ],
+  "license": "Apache-2.0",
+  "author": "Charles Jones",
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/charlesjones-dev/a11yhawk.git"
+  },
+  "homepage": "https://github.com/charlesjones-dev/a11yhawk#readme",
+  "bugs": {
+    "url": "https://github.com/charlesjones-dev/a11yhawk/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
