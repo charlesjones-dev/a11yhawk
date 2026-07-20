@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.1.2] - 2026-07-20
+
+Documentation-only release. No engine, API, or CLI changes.
+
+### Changed
+
+- **README.** The "How it works" diagram is a plain-text vertical pipeline again. The Mermaid version added in `0.1.1` renders on GitHub but not on npmjs.com, where it showed as raw Mermaid source; text renders identically on both.
+
 ## [0.1.1] - 2026-07-20
 
 Documentation-only release. No engine, API, or CLI changes.
@@ -41,5 +49,6 @@ First functional release. The scan engine, its library API, the CLI, server mode
 
 - Initial name-reserving stub. Published to npm and unpublished the same day (metadata correction); superseded by `0.0.2`. Per npm policy the version number remains permanently unusable.
 
+[0.1.2]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.2
 [0.1.1]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.1
 [0.1.0]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.0

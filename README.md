@@ -12,18 +12,28 @@ Runs entirely on your own infrastructure. No accounts, no telemetry, no phone-ho
 
 ## How it works
 
-```mermaid
-flowchart TD
-    accTitle: A11yHawk scan pipeline
-    accDescr: The scan pipeline runs top to bottom. A11yHawk validates the URL, captures the page with Playwright, runs a Lighthouse accessibility audit, then optionally sends the page context to an LLM. Findings are parsed and scored by the engine, which emits JSON, markdown, HTML, and an annotated screenshot.
-
-    U["validate URL"] --> P["Playwright capture<br/>screenshot, a11y tree, HTML"]
-    P --> L["Lighthouse audit<br/>deterministic, accessibility-only"]
-    L --> D{"LLM configured?"}
-    D -- "yes" --> M["LLM analysis<br/>BYOK"]
-    D -- "no" --> S
-    M --> S["parse and score<br/>recomputed by the engine"]
-    S --> R["reports<br/>JSON, markdown, HTML,<br/>annotated screenshot"]
+```text
+  validate URL
+       |
+       v
+  Playwright capture
+  (screenshot, a11y tree, HTML)
+       |
+       v
+  Lighthouse audit
+  (deterministic, accessibility-only)
+       |
+       v
+  LLM analysis
+  (BYOK, optional; skipped in Lighthouse-only mode)
+       |
+       v
+  parse and score
+  (always recomputed by the engine)
+       |
+       v
+  reports
+  (JSON, markdown, HTML, annotated screenshot)
 ```
 
 - **Playwright capture**: full-page screenshot (tiled to your LLM provider's image limits), Chrome DevTools accessibility tree, and HTML sanitized down to its accessibility-relevant structure.
