@@ -23,7 +23,7 @@ A11yHawk is a self-hostable web accessibility scan engine: Playwright page captu
 
 It was extracted from the private `accesshawk-nuxt` monorepo's worker (expected as a sibling checkout at `../accesshawk-nuxt`); this repo is now the source of truth for the pipeline, and the AccessHawk worker will eventually consume this package. That drives a hard compatibility contract: the result interfaces in `src/types.ts` (`StructuredScanOutput`, `AccessibilityIssue`, etc.) are intentionally shape-identical to AccessHawk's persisted scan format. Keep changes to them additive.
 
-`docs/` is deliberately gitignored: it holds local planning docs (including the AccessHawk integration prompt) that reference the private monorepo and must not be published.
+`docs/` is deliberately gitignored except for `docs/kb/` (`.gitignore`: `docs/*` then `!docs/kb/`). The ignored part holds local planning docs (including the AccessHawk integration prompt) that reference the private monorepo and must not be published; `docs/kb/` is the tracked knowledge base and is committed normally. Never put private-monorepo details in `docs/kb/`.
 
 ## Architecture
 
