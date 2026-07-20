@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.1.3] - 2026-07-20
+
+### Changed
+
+- **`doctor` fix hint.** When Chromium is missing, `a11yhawk doctor` now prints a version-pinned `npx playwright@<version> install chromium` command matching its bundled Playwright, instead of the unpinned form. Outside a project, unpinned `npx playwright install` resolves the registry's latest Playwright and downloads browser builds the package cannot use.
+- **README.** Playwright install commands that run outside a project install (Requirements, the run-without-installing quickstart, the CI example, and the For AI agents section) are now version-pinned for the same reason. In-project commands stay unpinned, since there npx correctly resolves the bundled Playwright.
+
 ## [0.1.2] - 2026-07-20
 
 Documentation-only release. No engine, API, or CLI changes.
@@ -49,6 +56,7 @@ First functional release. The scan engine, its library API, the CLI, server mode
 
 - Initial name-reserving stub. Published to npm and unpublished the same day (metadata correction); superseded by `0.0.2`. Per npm policy the version number remains permanently unusable.
 
+[0.1.3]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.3
 [0.1.2]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.2
 [0.1.1]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.1
 [0.1.0]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.0

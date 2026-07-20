@@ -42,6 +42,25 @@ function checkNode(): DoctorCheck {
 }
 
 /**
+ * Browser downloads are pinned per Playwright version, so the fix command must
+ * run the exact Playwright this package bundles: a bare `npx playwright
+ * install` outside a project resolves the registry's latest and downloads
+ * browser builds this package cannot use.
+ */
+function chromiumFixCommand(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const { version } = require('playwright/package.json') as { version?: string };
+    if (version) {
+      return `npx playwright@${version} install chromium`;
+    }
+  } catch {
+    // Unresolvable playwright package; fall through to the unpinned command.
+  }
+  return 'npx playwright install chromium';
+}
+
+/**
  * Playwright must have a Chromium executable on disk. executablePath() returns
  * the expected location whether or not the download has run, so an explicit
  * existence check is what actually tells us it is installed.
@@ -58,7 +77,7 @@ function checkChromium(): DoctorCheck {
     name: 'Playwright Chromium',
     ok,
     detail: ok ? execPath : execPath || 'not found',
-    fix: ok ? undefined : 'npx playwright install chromium',
+    fix: ok ? undefined : chromiumFixCommand(),
   };
 }
 

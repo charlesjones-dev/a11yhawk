@@ -44,7 +44,7 @@ Runs entirely on your own infrastructure. No accounts, no telemetry, no phone-ho
 ## Requirements
 
 - Node.js >= 20 (ESM-only package; use `import`)
-- Chromium for Playwright (one-time): `npx playwright install chromium`
+- Chromium for Playwright (one-time): `npx playwright install chromium` from a project with a11yhawk installed, or `npx playwright@1.57.0 install chromium` from anywhere else (browser downloads are pinned per Playwright version, and an unpinned `npx playwright` outside a project resolves the registry's latest)
 - For LLM mode: an API key for [OpenRouter](https://openrouter.ai/) or any OpenAI-compatible endpoint. You bring your own key and pay your own token costs; A11yHawk adds nothing on top.
 
 ## Install
@@ -196,8 +196,11 @@ npx a11yhawk https://example.com
 # Full AI analysis (bring your own OpenRouter-compatible key)
 npx a11yhawk https://example.com --api-key sk-...
 
-# One-time Chromium download if you have never used Playwright on this machine
-npx playwright install chromium
+# One-time Chromium download if you have never used Playwright on this machine.
+# The version pin matters here: outside a project, an unpinned `npx playwright`
+# resolves the registry's latest, whose browser builds a11yhawk cannot use.
+# `npx a11yhawk doctor` prints the exact command when Chromium is missing.
+npx playwright@1.57.0 install chromium
 ```
 
 The default command scans a single URL and writes `report.json` and `report.md` (add `html` for the self-contained HTML report), plus `screenshot.jpg` and `annotated.jpg` when available. LLM mode turns on automatically when an API key is present (flag or env) and `--no-llm` is absent; otherwise the scan runs Lighthouse-only, which needs no key and finishes in seconds.
@@ -259,7 +262,7 @@ The CLI reads these as fallbacks; an explicit flag always wins. The library itse
 
 ### `doctor`
 
-`a11yhawk doctor` verifies that a scan can run at all: Node.js >= 20, a usable Playwright Chromium (it prints `npx playwright install chromium` when that is what is missing), and a resolvable Lighthouse CLI. It also reports whether an API key is configured, which is informational only since Lighthouse-only mode needs none. It exits `0` when Lighthouse-only scanning is possible and `3` otherwise, so it doubles as a CI preflight.
+`a11yhawk doctor` verifies that a scan can run at all: Node.js >= 20, a usable Playwright Chromium (it prints the version-pinned `npx playwright@<version> install chromium` command matching its bundled Playwright when that is what is missing), and a resolvable Lighthouse CLI. It also reports whether an API key is configured, which is informational only since Lighthouse-only mode needs none. It exits `0` when Lighthouse-only scanning is possible and `3` otherwise, so it doubles as a CI preflight.
 
 ### CI example
 
@@ -275,7 +278,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright@1.57.0 install --with-deps chromium
       - name: Accessibility gate
         run: npx a11yhawk https://your-site.example --fail-below 90 --format json,html --output a11y-report
       - if: always()
@@ -372,7 +375,7 @@ Found a vulnerability? Please open a GitHub security advisory rather than a publ
 
 Everything above applies; this section is deliberately compact and exact.
 
-- Package: `a11yhawk` (npm). ESM only. Node >= 20. Requires Chromium: `npx playwright install chromium`.
+- Package: `a11yhawk` (npm). ESM only. Node >= 20. Requires Chromium: `npx playwright@1.57.0 install chromium` (pin matches the bundled Playwright; unpinned is fine only inside a project that has a11yhawk installed).
 - Exports: `scan`, `A11yHawkEngine`, `renderHtmlReport`, `ScanError`, `createLogger`, `DEFAULT_MODEL`, plus all types (`ScanOptions`, `EngineOptions`, `ScanReport`, `StructuredScanOutput`, `AccessibilityIssue`, ...). Full `.d.ts` shipped.
 - Minimal complete program:
 

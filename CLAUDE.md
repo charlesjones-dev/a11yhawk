@@ -54,7 +54,7 @@ Changes to `request-guard.ts`, `url-validator.ts`, or the Lighthouse spawn get e
 
 ## Releases
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`: verify -> npm publish via trusted publishing (OIDC + provenance, no tokens anywhere) -> Docker image to GHCR. The Dockerfile's base image tag must match the installed `playwright` version. `prepublishOnly` runs the full verify. While 0.x, breaking API changes may ride minor bumps (documented in CHANGELOG.md); 1.0.0 is reserved until the API has stabilized against real adoption.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`: verify -> npm publish via trusted publishing (OIDC + provenance, no tokens anywhere) -> Docker image to GHCR. The Dockerfile's base image tag must match the installed `playwright` version. So must the README's version-pinned `npx playwright@X.Y.Z install chromium` commands (Requirements, quickstart, CI example, For AI agents sections) — bump them in the same commit as any `playwright` dependency bump; commands meant to run inside a project with a11yhawk installed stay unpinned (npx resolves the local dependency), and `doctor` derives its pinned command at runtime so it needs no edit. `prepublishOnly` runs the full verify. While 0.x, breaking API changes may ride minor bumps (documented in CHANGELOG.md); 1.0.0 is reserved until the API has stabilized against real adoption.
 
 ## Development Principles
 
