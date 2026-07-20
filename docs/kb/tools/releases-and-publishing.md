@@ -1,6 +1,6 @@
 ---
 tags: [release, npm, publishing, ghcr, versioning]
-related: [[github-actions]]
+related: [[github-actions]], [[dependency-audit]]
 created: 2026-07-20
 last-updated: 2026-07-20
 pinned: false
@@ -23,3 +23,4 @@ Operational lessons for publishing a11yhawk to npm and GHCR, learned during the 
 ## Related
 
 - [[github-actions]]
+- [[dependency-audit]]

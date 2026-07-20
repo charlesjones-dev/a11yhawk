@@ -89,6 +89,7 @@ Follow SOLID, DRY, KISS, and YAGNI in all code changes:
 Topic-specific knowledge is stored in `docs/kb/` and loaded contextually based on the table below.
 
 **How to use the "When to Load" column:**
+
 1. **Pinned entries** (`Always (pinned)`): Load at the start of every conversation.
 2. **Scope patterns** (backtick-wrapped globs like `src/api/**`): Load when the files you are editing or creating match any of the listed glob patterns.
 3. **Keywords** (after the `—` dash): Load when the current task involves these topics, even if no file path matches.
@@ -98,79 +99,100 @@ Topic-specific knowledge is stored in `docs/kb/` and loaded contextually based o
 
 When a KB file's frontmatter contains `related: [[other-file]]` cross-references, also read the related file(s) for full context.
 
-| Topic | File | When to Load |
-|-------|------|--------------|
-| GitHub Actions | docs/kb/tools/github-actions.md | `.github/workflows/**` — ci, actions, debugging |
-| Global Learnings | docs/kb/_global-learnings.md | Always (pinned) |
-| KB Index | docs/kb/_index.md | Always (pinned) |
-| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning |
+| Topic                 | File                                     | When to Load                                                                         |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security |
+| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                      |
+| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                      |
+| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                      |
+| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning       |
 
 <!-- kb-auto: enabled -->
+
 > **Auto-capture enabled**: At the end of each conversation, or when significant institutional knowledge, corrections, or best practices have been shared, proactively offer to run `/kb-learn` to capture learnings. Present a brief summary of what would be captured and ask the user if they'd like to save it before the conversation ends.
 
 ## PR and Commit Hygiene
 
 <!-- workflow-rules:id=pr-scope-current-session -->
+
 ### PR/commit descriptions cover only current-session changes
 
 - Describe ONLY what changed in the commits authored in the current session. Do not describe prior commits on the branch, even if the PR will include them. If the branch carries unrelated prior commits, mention that in one line ("Branch also carries N prior commits not from this session") and stop — do not summarize them.
+
 <!-- /workflow-rules:id=pr-scope-current-session -->
 
 <!-- workflow-rules:id=no-fabricated-test-plans -->
+
 ### Don't invent test plans
 
 - Do not invent test plans, checklists, or verification steps that were not actually performed. If no testing was done, omit the test plan section entirely, or write a single line like "Not tested locally" with one sentence on what would need verification.
+
 <!-- /workflow-rules:id=no-fabricated-test-plans -->
 
 <!-- workflow-rules:id=no-speculative-deploy-steps -->
+
 ### Don't add speculative deploy/rollout steps
 
 - Do not add speculative deploy, rollout, or post-merge steps unless asked.
+
 <!-- /workflow-rules:id=no-speculative-deploy-steps -->
 
 <!-- workflow-rules:id=short-pr-bodies -->
+
 ### Keep PR bodies short
 
 - Keep PR bodies short. A 1-3 bullet summary of the actual diff is usually enough. No filler sections, no headers for the sake of structure.
+
 <!-- /workflow-rules:id=short-pr-bodies -->
 
 <!-- workflow-rules:id=scoped-commit-messages -->
+
 ### Scope commit messages to the diff
 
 - Commit messages: describe what the diff does, not surrounding context, future plans, or unrelated work.
+
 <!-- /workflow-rules:id=scoped-commit-messages -->
 
 <!-- workflow-rules:id=no-generated-by-footers -->
+
 ### Don't add "Generated with Claude Code" footers
 
 - Never add boilerplate footers (e.g. "Generated with Claude Code") to PR bodies or commit messages unless explicitly requested.
+
 <!-- /workflow-rules:id=no-generated-by-footers -->
 
 ## Scope Discipline
 
 <!-- workflow-rules:id=no-unrequested-features -->
+
 ### Don't add features beyond what was requested
 
 - Don't add features, refactor, or introduce abstractions beyond what the task requires. A bug fix doesn't need surrounding cleanup; a one-shot operation doesn't need a helper.
+
 <!-- /workflow-rules:id=no-unrequested-features -->
 
 <!-- workflow-rules:id=confirm-risky-actions -->
+
 ### Confirm before risky or shared-state actions
 
 - For destructive, hard-to-reverse, or shared-state actions (force pushes, branch deletes, dependency removal, posting to chat platforms), confirm with the user before acting unless explicitly authorized in advance.
+
 <!-- /workflow-rules:id=confirm-risky-actions -->
 
 ## Communication Style
 
 <!-- workflow-rules:id=no-internal-narration -->
+
 ### Don't narrate internal deliberation
 
 - Don't narrate internal deliberation in user-facing text. State results and decisions directly. Brief sentence-level updates are fine; running commentary is not.
+
 <!-- /workflow-rules:id=no-internal-narration -->
 
 <!-- workflow-rules:id=match-response-to-task -->
+
 ### Match response length to task complexity
 
 - Match response length to the task. A simple question gets a direct answer, not headers and sections.
-<!-- /workflow-rules:id=match-response-to-task -->
 
+<!-- /workflow-rules:id=match-response-to-task -->
