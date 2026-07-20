@@ -1,7 +1,7 @@
 {
   "name": "a11yhawk",
   "version": "0.0.2",
-  "description": "Open-source, self-hostable web accessibility scan engine: Playwright capture, Lighthouse audits, and BYOK LLM analysis producing structured WCAG reports. This version is a name-reserving stub; the engine ships in upcoming releases.",
+  "description": "Open-source, self-hostable web accessibility scan engine: Playwright capture, Lighthouse audits, and BYOK LLM analysis producing structured WCAG reports.",
   "keywords": [
     "accessibility",
     "a11y",
@@ -15,12 +15,33 @@
   "license": "Apache-2.0",
   "author": "Charles Jones",
   "type": "module",
-  "exports": {
-    ".": "./index.js"
+  "engines": {
+    "node": ">=20"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
-    "index.js"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "verify": "npm run lint && npm run typecheck && npm run test:run && npm run build",
+    "prepublishOnly": "npm run verify"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/charlesjones-dev/a11yhawk.git"
@@ -29,7 +50,14 @@
   "bugs": {
     "url": "https://github.com/charlesjones-dev/a11yhawk/issues"
   },
-  "engines": {
-    "node": ">=20"
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10"
   }
 }

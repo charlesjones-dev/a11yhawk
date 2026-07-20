@@ -6,3 +6,4 @@ dist/
 .env.*
 a11yhawk-output/
 .DS_Store
+coverage/
