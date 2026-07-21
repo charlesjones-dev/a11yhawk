@@ -424,6 +424,7 @@ export class A11yHawkEngine {
           standard,
           lighthouseResult?.issues,
           pageData.screenshotTiles?.length,
+          log,
         );
 
         const llmService = new LLMService({

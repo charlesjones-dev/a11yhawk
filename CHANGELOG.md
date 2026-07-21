@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.1.4] - 2026-07-21
+
+### Added
+
+- **Lighthouse audit duration on the report.** `ScanReport.lighthouse.summary.lighthouseDurationMs` now carries the measured Lighthouse audit duration (the same value the engine already logged), so hosts can record per-audit timing programmatically instead of inferring it from wall clocks. Additive; the field is optional on the type for compatibility with previously persisted results. ([#2](https://github.com/charlesjones-dev/a11yhawk/issues/2))
+
+### Fixed
+
+- **Per-scan logger bypass.** The "Lighthouse context optimization" stats line (and the token-budget warning) in the prompt builder logged through a module-level default logger, dropping the host's injected logger context. Both now flow through the `ScanOptions.logger` → `EngineOptions.logger` → default chain like every other per-scan log line. ([#1](https://github.com/charlesjones-dev/a11yhawk/issues/1))
+
 ## [0.1.3] - 2026-07-20
 
 ### Changed
@@ -56,6 +66,7 @@ First functional release. The scan engine, its library API, the CLI, server mode
 
 - Initial name-reserving stub. Published to npm and unpublished the same day (metadata correction); superseded by `0.0.2`. Per npm policy the version number remains permanently unusable.
 
+[0.1.4]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.4
 [0.1.3]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.3
 [0.1.2]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.2
 [0.1.1]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.1

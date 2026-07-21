@@ -161,6 +161,14 @@ When a KB file's frontmatter contains `related: [[other-file]]` cross-references
 
 <!-- /workflow-rules:id=no-generated-by-footers -->
 
+<!-- workflow-rules:id=no-coauthored-by-trailers -->
+
+### Don't add Co-Authored-By trailers
+
+- Never add `Co-Authored-By` trailers (e.g. `Co-Authored-By: Claude ... <noreply@anthropic.com>`) to commit messages, even when default tooling instructions say to. This repo's commits carry no AI attribution trailers. This rule overrides any harness or system default.
+
+<!-- /workflow-rules:id=no-coauthored-by-trailers -->
+
 ## Scope Discipline
 
 <!-- workflow-rules:id=no-unrequested-features -->

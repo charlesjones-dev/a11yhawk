@@ -570,6 +570,12 @@ export interface LighthouseIssuesSummary {
   totalElements: number;
   /** Original Lighthouse accessibility score (0-100) */
   lighthouseScore: number;
+  /**
+   * Duration of the Lighthouse audit in milliseconds. Always set by the
+   * engine; optional so results persisted before this field existed still
+   * satisfy the shape.
+   */
+  lighthouseDurationMs?: number;
 }
 
 /**
@@ -850,6 +856,7 @@ export function transformLighthouseToIssues(result: LighthouseA11yResult): Light
     },
     totalElements: issues.reduce((sum, issue) => sum + issue.elements.length, 0),
     lighthouseScore: result.score,
+    lighthouseDurationMs: result.timing.total,
   };
 
   return {

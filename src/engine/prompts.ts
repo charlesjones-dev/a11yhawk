@@ -1,7 +1,7 @@
 import { sanitizeHtml, a11yTreeToCompactJson, CONTENT_MARKERS, escapeForPrompt } from './sanitizers.js';
 import type { LighthouseIssue, CompactLighthouseIssue } from './lighthouse.js';
 import { transformToCompactFormat, estimateTokenCount } from './lighthouse.js';
-import { createLogger } from '../logger/index.js';
+import { createLogger, type Logger } from '../logger/index.js';
 
 const promptLogger = createLogger({ serviceName: 'engine' });
 
@@ -1218,6 +1218,7 @@ Do NOT include any text before or after the JSON object. Your entire response mu
  * @param standard - The WCAG standard to check against (e.g., "WCAG 2.2 - AA")
  * @param lighthouseIssues - Optional issues from Lighthouse accessibility audit
  * @param imageCount - Number of screenshot tiles (for long pages split into multiple images)
+ * @param jobLogger - Optional logger for job-specific logging
  */
 export async function buildJsonScanPrompt(
   url: string,
@@ -1226,7 +1227,9 @@ export async function buildJsonScanPrompt(
   standard: string,
   lighthouseIssues?: LighthouseIssue[],
   imageCount?: number,
+  jobLogger?: Logger,
 ): Promise<string> {
+  const log = jobLogger ?? promptLogger;
   const date = new Date().toISOString();
 
   // Parse standard (e.g., "WCAG 2.2 - AA")
@@ -1255,7 +1258,7 @@ export async function buildJsonScanPrompt(
     const fullTokens = estimateTokenCount(lighthouseIssues);
     const savings = fullTokens - compactTokens;
 
-    promptLogger.info('Lighthouse context optimization', {
+    log.info('Lighthouse context optimization', {
       issueCount: lighthouseIssues.length,
       compactTokens,
       fullTokens,
@@ -1265,7 +1268,7 @@ export async function buildJsonScanPrompt(
 
     // Warn if compact format still exceeds 1000 tokens
     if (compactTokens > 1000) {
-      promptLogger.warn('Lighthouse data exceeds token budget', {
+      log.warn('Lighthouse data exceeds token budget', {
         compactTokens,
         budget: 1000,
         overflow: compactTokens - 1000,
