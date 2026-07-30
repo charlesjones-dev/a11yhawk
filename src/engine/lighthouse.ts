@@ -1,8 +1,9 @@
 /**
- * Lighthouse Service for accessibility audits
+ * Lighthouse Service for accessibility and performance audits
  *
- * This service wraps Google Lighthouse to run accessibility-only audits
- * against a page using an existing Chrome DevTools Protocol (CDP) connection.
+ * This service wraps Google Lighthouse to run category-scoped audits against
+ * a page using an existing Chrome DevTools Protocol (CDP) connection. All
+ * requested categories run in a single subprocess and a single page load.
  */
 // Note: lighthouse is imported dynamically to avoid blocking module initialization
 // The lighthouse package is large (~50MB) and can cause ESM/CJS issues with static imports
@@ -14,6 +15,16 @@ const defaultLogger = createLogger({ serviceName: 'worker' });
 
 // Default timeout for Lighthouse audits (30 seconds)
 const DEFAULT_AUDIT_TIMEOUT_MS = 30000;
+
+// Performance runs collect and process a trace on top of the page load, so
+// they get a higher timeout floor regardless of the constructor timeout.
+const PERFORMANCE_AUDIT_TIMEOUT_MS = 60000;
+
+// Grace period after SIGTERM before a timed-out Lighthouse child is SIGKILLed.
+const KILL_GRACE_MS = 5000;
+
+// Opportunities are capped so bulk consumers get a stable, bounded payload.
+const MAX_PERFORMANCE_OPPORTUNITIES = 10;
 
 /**
  * Lighthouse accessibility audit item details
@@ -85,6 +96,66 @@ export interface LighthouseA11yCategory {
 }
 
 /**
+ * Lighthouse categories the engine can run. Every requested category is
+ * audited in one subprocess run / one page load. The accessibility category
+ * is always required: it is the engine's analysis source in Lighthouse-only
+ * mode and the basis of the structured report.
+ */
+export type LighthouseCategory = 'accessibility' | 'performance';
+
+/** Runtime companion to LighthouseCategory for validating untyped input. */
+export const LIGHTHOUSE_CATEGORY_VALUES: readonly LighthouseCategory[] = ['accessibility', 'performance'];
+
+/**
+ * Key page-load metrics from the Lighthouse performance category. All timing
+ * values are milliseconds; cumulativeLayoutShift is the unitless CLS score.
+ * Each field is optional because Lighthouse omits metrics it could not
+ * measure (for example on pages that never paint).
+ */
+export interface LighthousePerformanceMetrics {
+  /** First Contentful Paint in milliseconds. */
+  firstContentfulPaintMs?: number;
+  /** Largest Contentful Paint in milliseconds. */
+  largestContentfulPaintMs?: number;
+  /** Cumulative Layout Shift (unitless, rounded to 3 decimals). */
+  cumulativeLayoutShift?: number;
+  /** Total Blocking Time in milliseconds. */
+  totalBlockingTimeMs?: number;
+  /** Speed Index in milliseconds. */
+  speedIndexMs?: number;
+}
+
+/** A failing performance audit with an estimated improvement. */
+export interface LighthousePerformanceOpportunity {
+  /** Lighthouse audit ID (e.g. "render-blocking-resources"). */
+  auditId: string;
+  /** Human-readable audit title. */
+  title: string;
+  /** Estimated load-time savings in milliseconds, when Lighthouse reports one. */
+  estimatedSavingsMs?: number;
+  /** Estimated transfer savings in bytes, when Lighthouse reports one. */
+  estimatedSavingsBytes?: number;
+}
+
+/**
+ * Typed summary of the Lighthouse performance category. Produced from the
+ * same run (same page load) as the accessibility audit.
+ */
+export interface LighthousePerformanceResult {
+  /**
+   * Performance category score (0-100), or null when Lighthouse could not
+   * compute one (metrics may still be partially present).
+   */
+  score: number | null;
+  metrics: LighthousePerformanceMetrics;
+  /**
+   * Failing audits with an estimated ms/bytes improvement, sorted by
+   * estimated time savings (largest first), capped at 10 entries.
+   */
+  opportunities: LighthousePerformanceOpportunity[];
+}
+
+/**
  * Main Lighthouse accessibility audit result
  */
 export interface LighthouseA11yResult {
@@ -105,6 +176,10 @@ export interface LighthouseA11yResult {
   lighthouseVersion: string;
   /** Fetch time of the audit */
   fetchTime: string;
+  /** Performance summary, set when the performance category was requested. */
+  performance?: LighthousePerformanceResult;
+  /** Trimmed raw Lighthouse result (LHR), set when includeRaw was requested. */
+  raw?: Record<string, unknown>;
 }
 
 /**
@@ -120,30 +195,149 @@ export class LighthouseAuditError extends Error {
   }
 }
 
+// Chrome flags for when Lighthouse launches its own Chrome (no CDP port),
+// optimized for containerized environments (Railway, Docker). These reduce
+// memory usage and prevent "Browser tab has unexpectedly crashed" errors.
+// Note: --no-sandbox is required on Railway as it doesn't support user
+// namespaces. Security is mitigated by: non-root user, container isolation,
+// ephemeral containers.
+const CONTAINER_CHROME_FLAGS = [
+  '--headless=new',
+  '--no-sandbox',
+  '--disable-gpu',
+  '--disable-dev-shm-usage',
+  // Memory optimization
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--disable-translate',
+  '--mute-audio',
+  '--no-first-run',
+  '--disable-component-update',
+  '--disable-domain-reliability',
+  '--disable-features=TranslateUI,AudioServiceOutOfProcess',
+  '--disable-hang-monitor',
+  '--disable-ipc-flooding-protection',
+  '--disable-popup-blocking',
+  '--disable-prompt-on-repost',
+  '--disable-renderer-backgrounding',
+  '--disable-breakpad',
+  '--disable-client-side-phishing-detection',
+  // Additional memory/stability flags
+  '--disable-software-rasterizer',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-field-trial-config',
+  '--disable-back-forward-cache',
+];
+
 /**
- * Service for running Lighthouse accessibility audits
+ * Build the Lighthouse CLI argv for one audit run. All requested categories
+ * ride a single `--only-categories` flag, so they share one subprocess and
+ * one page load. Pure; exported for tests.
+ */
+export function buildLighthouseCliArgs(
+  url: string,
+  categories: readonly LighthouseCategory[],
+  cdpPort?: number,
+): string[] {
+  const args = [url, '--output=json', '--output-path=stdout', `--only-categories=${categories.join(',')}`, '--quiet'];
+  if (cdpPort) {
+    // Connect to the existing Playwright browser instead of launching a new
+    // Chrome. This saves memory by reusing the browser instance.
+    args.push(`--port=${cdpPort}`);
+  } else {
+    args.push(`--chrome-flags=${CONTAINER_CHROME_FLAGS.join(' ')}`);
+  }
+  return args;
+}
+
+/** Per-run options for a Lighthouse audit. */
+export interface LighthouseRunOptions {
+  /** CDP port of an already-running Chromium to reuse (from PlaywrightService). */
+  cdpPort?: number;
+  /**
+   * Categories to audit in the single subprocess run. Must include
+   * 'accessibility'. Default ['accessibility'].
+   */
+  categories?: readonly LighthouseCategory[];
+  /** Attach a trimmed raw LHR to the result (see trimLhrForOutput). Default false. */
+  includeRaw?: boolean;
+}
+
+/**
+ * Service for running Lighthouse audits
  */
 export class LighthouseService {
   private readonly timeoutMs: number;
+
+  /**
+   * Serializes runs that include the performance category. Parallel
+   * performance traces on one machine contend for CPU and skew FCP/LCP/TBT,
+   * so they run one at a time regardless of the engine's concurrency
+   * setting. Accessibility-only runs are unaffected.
+   */
+  private performanceRunChain: Promise<void> = Promise.resolve();
 
   constructor(timeoutMs: number = DEFAULT_AUDIT_TIMEOUT_MS) {
     this.timeoutMs = timeoutMs;
   }
 
   /**
-   * Run an accessibility-only Lighthouse audit
-   *
-   * @param url - The URL to audit
-   * @param cdpPort - Chrome DevTools Protocol port from Playwright browser
-   * @param jobLogger - Optional logger for job-specific logging
-   * @returns Lighthouse accessibility audit result
-   * @throws LighthouseAuditError if the audit fails or times out
+   * Run an accessibility-only Lighthouse audit. Kept as a stable alias for
+   * pre-categories callers; equivalent to runAudit with default categories.
    */
   async runAccessibilityAudit(url: string, cdpPort?: number, jobLogger?: Logger): Promise<LighthouseA11yResult> {
+    return this.runAudit(url, { cdpPort }, jobLogger);
+  }
+
+  /**
+   * Run a Lighthouse audit for the requested categories in one subprocess
+   * run / one page load.
+   *
+   * @param url - The URL to audit
+   * @param options - CDP port, categories, raw-result opt-in
+   * @param jobLogger - Optional logger for job-specific logging
+   * @returns Lighthouse audit result (accessibility always present;
+   *   `performance` set when that category was requested)
+   * @throws LighthouseAuditError if the audit fails or times out
+   */
+  async runAudit(url: string, options: LighthouseRunOptions = {}, jobLogger?: Logger): Promise<LighthouseA11yResult> {
+    const categories: readonly LighthouseCategory[] =
+      options.categories && options.categories.length > 0 ? options.categories : ['accessibility'];
+    if (!categories.includes('accessibility')) {
+      throw new LighthouseAuditError('Lighthouse runs must include the accessibility category');
+    }
+
+    if (!categories.includes('performance')) {
+      return this.executeAudit(url, categories, options, jobLogger);
+    }
+
+    // Queue behind any in-flight performance run (see performanceRunChain).
+    const run = this.performanceRunChain.then(() => this.executeAudit(url, categories, options, jobLogger));
+    this.performanceRunChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async executeAudit(
+    url: string,
+    categories: readonly LighthouseCategory[],
+    options: LighthouseRunOptions,
+    jobLogger?: Logger,
+  ): Promise<LighthouseA11yResult> {
     const log = jobLogger || defaultLogger;
     const startTime = Date.now();
+    const cdpPort = options.cdpPort;
+    // A performance trace needs more headroom than a DOM-only accessibility
+    // pass; raise the floor rather than exposing a per-scan timeout option.
+    const timeoutMs = categories.includes('performance')
+      ? Math.max(this.timeoutMs, PERFORMANCE_AUDIT_TIMEOUT_MS)
+      : this.timeoutMs;
 
-    log.info('Lighthouse accessibility audit starting', { url, timeoutMs: this.timeoutMs, cdpPort });
+    log.info('Lighthouse audit starting', { url, categories: categories.join(','), timeoutMs, cdpPort });
 
     // Run Lighthouse as CLI subprocess - more reliable than importing the module
     // which has ESM/CJS issues and can hang during dynamic imports
@@ -171,49 +365,9 @@ export class LighthouseService {
     log.debug('Running Lighthouse CLI', { node: process.execPath, cli: lighthouseCli, chromePath, cdpPort });
 
     const lhr = await new Promise<Record<string, unknown>>((resolvePromise, reject) => {
-      const args = [url, '--output=json', '--output-path=stdout', '--only-categories=accessibility', '--quiet'];
-
-      // If CDP port is provided, connect to existing Playwright browser instead of launching new Chrome
-      // This saves memory by reusing the browser instance
+      const args = buildLighthouseCliArgs(url, categories, cdpPort);
       if (cdpPort) {
-        args.push(`--port=${cdpPort}`);
         log.debug('Connecting to existing Chrome via CDP', { cdpPort });
-      } else {
-        // Chrome flags optimized for containerized environments (Railway, Docker)
-        // These reduce memory usage and prevent "Browser tab has unexpectedly crashed" errors
-        // Note: --no-sandbox is required on Railway as it doesn't support user namespaces.
-        // Security is mitigated by: non-root user, container isolation, ephemeral containers.
-        const chromeFlags = [
-          '--headless=new',
-          '--no-sandbox',
-          '--disable-gpu',
-          '--disable-dev-shm-usage',
-          // Memory optimization
-          '--disable-extensions',
-          '--disable-background-networking',
-          '--disable-default-apps',
-          '--disable-sync',
-          '--disable-translate',
-          '--mute-audio',
-          '--no-first-run',
-          '--disable-component-update',
-          '--disable-domain-reliability',
-          '--disable-features=TranslateUI,AudioServiceOutOfProcess',
-          '--disable-hang-monitor',
-          '--disable-ipc-flooding-protection',
-          '--disable-popup-blocking',
-          '--disable-prompt-on-repost',
-          '--disable-renderer-backgrounding',
-          '--disable-breakpad',
-          '--disable-client-side-phishing-detection',
-          // Additional memory/stability flags
-          '--disable-software-rasterizer',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-field-trial-config',
-          '--disable-back-forward-cache',
-        ].join(' ');
-
-        args.push(`--chrome-flags=${chromeFlags}`);
       }
 
       // Log memory before spawning Chrome
@@ -241,7 +395,7 @@ export class LighthouseService {
       // element is delivered as a literal argument and is never re-parsed by a shell.
       const child = spawn(process.execPath, [lighthouseCli, ...args], {
         shell: false,
-        timeout: this.timeoutMs,
+        timeout: timeoutMs,
         env: {
           ...process.env,
           CHROME_PATH: chromePath,
@@ -330,18 +484,28 @@ export class LighthouseService {
 
       // Handle timeout
       const timeoutHandle = setTimeout(() => {
-        log.warn('Lighthouse timeout - killing process', { pid, timeoutMs: this.timeoutMs });
+        log.warn('Lighthouse timeout - killing process', { pid, timeoutMs });
         child.kill('SIGTERM');
-        reject(new LighthouseAuditError(`Lighthouse audit timed out after ${this.timeoutMs}ms`));
-      }, this.timeoutMs);
+        // A child stuck in trace processing can ignore SIGTERM; escalate so a
+        // long-lived host never accumulates zombie Lighthouse processes.
+        const killTimer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) {
+            log.warn('Lighthouse ignored SIGTERM - sending SIGKILL', { pid });
+            child.kill('SIGKILL');
+          }
+        }, KILL_GRACE_MS);
+        killTimer.unref();
+        child.once('exit', () => clearTimeout(killTimer));
+        reject(new LighthouseAuditError(`Lighthouse audit timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
     });
 
     const duration = Date.now() - startTime;
     log.debug('Lighthouse CLI completed', { durationMs: duration });
 
     // Type assertion for lhr structure
-    const categories = lhr.categories as Record<string, unknown> | undefined;
-    const accessibilityCategory = categories?.accessibility as
+    const lhrCategories = lhr.categories as Record<string, unknown> | undefined;
+    const accessibilityCategory = lhrCategories?.accessibility as
       | {
           score: number | null;
           title: string;
@@ -419,13 +583,20 @@ export class LighthouseService {
       fetchTime: (lhr.fetchTime as string) || new Date().toISOString(),
     };
 
+    if (categories.includes('performance')) {
+      result.performance = extractPerformanceFromLhr(lhr);
+    }
+    if (options.includeRaw) {
+      result.raw = trimLhrForOutput(lhr);
+    }
+
     // Count passing and failing audits
     const auditValues = Object.values(audits);
     const passingAudits = auditValues.filter((a) => a.score === 1).length;
     const failingAudits = auditValues.filter((a) => a.score !== null && a.score < 1).length;
     const notApplicable = auditValues.filter((a) => a.score === null).length;
 
-    log.info('Lighthouse accessibility audit complete', {
+    log.info('Lighthouse audit complete', {
       durationMs: duration,
       score,
       totalAudits: auditValues.length,
@@ -433,6 +604,7 @@ export class LighthouseService {
       failing: failingAudits,
       notApplicable,
       finalUrl: result.finalUrl,
+      ...(result.performance ? { performanceScore: result.performance.score } : {}),
     });
 
     return result;
@@ -441,6 +613,108 @@ export class LighthouseService {
 
 // Export a singleton instance
 export const lighthouseService = new LighthouseService();
+
+// Metric audits whose numericValue feeds LighthousePerformanceMetrics. These
+// audit ids have been stable across Lighthouse major versions.
+const PERFORMANCE_METRIC_AUDITS: ReadonlyArray<
+  readonly [auditId: string, key: keyof LighthousePerformanceMetrics, unit: 'ms' | 'unitless']
+> = [
+  ['first-contentful-paint', 'firstContentfulPaintMs', 'ms'],
+  ['largest-contentful-paint', 'largestContentfulPaintMs', 'ms'],
+  ['cumulative-layout-shift', 'cumulativeLayoutShift', 'unitless'],
+  ['total-blocking-time', 'totalBlockingTimeMs', 'ms'],
+  ['speed-index', 'speedIndexMs', 'ms'],
+];
+
+/**
+ * Extract the typed performance summary from a raw Lighthouse result (LHR).
+ *
+ * Opportunities are the failing performance audits that carry an estimated
+ * improvement: legacy opportunity audits report `details.overallSavingsMs` /
+ * `details.overallSavingsBytes`; newer insight audits report per-metric
+ * `metricSavings`, of which the largest becomes the headline ms estimate.
+ *
+ * @throws LighthouseAuditError when the LHR has no performance category
+ */
+export function extractPerformanceFromLhr(lhr: Record<string, unknown>): LighthousePerformanceResult {
+  const categories = lhr.categories as Record<string, unknown> | undefined;
+  const perfCategory = categories?.performance as
+    { score?: number | null; auditRefs?: Array<{ id: string }> } | undefined;
+  if (!perfCategory) {
+    throw new LighthouseAuditError('Performance category not found in Lighthouse results');
+  }
+
+  const audits = lhr.audits as Record<string, Record<string, unknown>> | undefined;
+
+  const metrics: LighthousePerformanceMetrics = {};
+  for (const [auditId, key, unit] of PERFORMANCE_METRIC_AUDITS) {
+    const numericValue = audits?.[auditId]?.numericValue;
+    if (typeof numericValue !== 'number' || !Number.isFinite(numericValue)) continue;
+    metrics[key] = unit === 'ms' ? Math.round(numericValue) : Math.round(numericValue * 1000) / 1000;
+  }
+
+  const opportunities: LighthousePerformanceOpportunity[] = [];
+  for (const ref of perfCategory.auditRefs ?? []) {
+    const audit = audits?.[ref.id];
+    if (!audit) continue;
+    // score >= 1 is passing; null is informative/not-applicable.
+    if (typeof audit.score !== 'number' || audit.score >= 1) continue;
+
+    const details = audit.details as Record<string, unknown> | undefined;
+    const rawSavingsMs = details?.overallSavingsMs;
+    let estimatedSavingsMs =
+      typeof rawSavingsMs === 'number' && rawSavingsMs > 0 ? Math.round(rawSavingsMs) : undefined;
+    if (estimatedSavingsMs === undefined) {
+      const metricSavings = audit.metricSavings as Record<string, unknown> | undefined;
+      const savings = Object.values(metricSavings ?? {}).filter((v): v is number => typeof v === 'number' && v > 0);
+      if (savings.length > 0) estimatedSavingsMs = Math.round(Math.max(...savings));
+    }
+    const rawSavingsBytes = details?.overallSavingsBytes;
+    const estimatedSavingsBytes =
+      typeof rawSavingsBytes === 'number' && rawSavingsBytes > 0 ? Math.round(rawSavingsBytes) : undefined;
+
+    if (estimatedSavingsMs === undefined && estimatedSavingsBytes === undefined) continue;
+    opportunities.push({
+      auditId: ref.id,
+      title: typeof audit.title === 'string' ? audit.title : ref.id,
+      ...(estimatedSavingsMs !== undefined ? { estimatedSavingsMs } : {}),
+      ...(estimatedSavingsBytes !== undefined ? { estimatedSavingsBytes } : {}),
+    });
+  }
+  opportunities.sort(
+    (a, b) =>
+      (b.estimatedSavingsMs ?? 0) - (a.estimatedSavingsMs ?? 0) ||
+      (b.estimatedSavingsBytes ?? 0) - (a.estimatedSavingsBytes ?? 0),
+  );
+
+  return {
+    score: typeof perfCategory.score === 'number' ? Math.round(perfCategory.score * 100) : null,
+    metrics,
+    opportunities: opportunities.slice(0, MAX_PERFORMANCE_OPPORTUNITIES),
+  };
+}
+
+// Audits whose details carry base64 screenshot payloads (megabytes each).
+const SCREENSHOT_AUDIT_IDS = ['screenshot-thumbnails', 'final-screenshot'];
+
+/**
+ * Trim an LHR for inclusion in a report: drop the full-page screenshot
+ * artifact, screenshot-carrying audits, and localization tables. They
+ * dominate LHR size without adding audit signal, and keeping them would make
+ * `includeRaw` unsafe for bulk scanning. Does not mutate the input.
+ */
+export function trimLhrForOutput(lhr: Record<string, unknown>): Record<string, unknown> {
+  const trimmed: Record<string, unknown> = { ...lhr };
+  delete trimmed.fullPageScreenshot;
+  delete trimmed.i18n;
+  const audits = lhr.audits;
+  if (typeof audits === 'object' && audits !== null && !Array.isArray(audits)) {
+    const auditsCopy: Record<string, unknown> = { ...(audits as Record<string, unknown>) };
+    for (const id of SCREENSHOT_AUDIT_IDS) delete auditsCopy[id];
+    trimmed.audits = auditsCopy;
+  }
+  return trimmed;
+}
 
 // ============================================================================
 // Compact Format for LLM Context Optimization
@@ -586,6 +860,22 @@ export interface LighthouseTransformedResult {
   issues: LighthouseIssue[];
   /** Summary statistics */
   summary: LighthouseIssuesSummary;
+  /**
+   * Lighthouse version that produced the result (provenance for downstream
+   * reports). Optional so results persisted before this field existed still
+   * satisfy the shape.
+   */
+  lighthouseVersion?: string;
+  /**
+   * Performance category summary. Present only when the scan requested the
+   * performance category (ScanOptions.lighthouse.categories).
+   */
+  performance?: LighthousePerformanceResult;
+  /**
+   * Trimmed raw Lighthouse result (screenshot payloads and localization
+   * tables removed). Present only when requested via includeRaw.
+   */
+  raw?: Record<string, unknown>;
 }
 
 /**
@@ -862,5 +1152,8 @@ export function transformLighthouseToIssues(result: LighthouseA11yResult): Light
   return {
     issues,
     summary,
+    lighthouseVersion: result.lighthouseVersion,
+    ...(result.performance ? { performance: result.performance } : {}),
+    ...(result.raw ? { raw: result.raw } : {}),
   };
 }

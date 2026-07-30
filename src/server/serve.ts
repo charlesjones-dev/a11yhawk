@@ -26,8 +26,15 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { renderHtmlReport } from '../engine/html-report.js';
-import { A11yHawkEngine, ScanError } from '../engine/scan.js';
-import type { EngineOptions, ScanOptions, ScanProgressEvent, ScanReport } from '../engine/scan.js';
+import { A11yHawkEngine, resolveLighthouseConfig, ScanError } from '../engine/scan.js';
+import type {
+  EngineOptions,
+  ScanLighthouseOptions,
+  ScanOptions,
+  ScanProgressEvent,
+  ScanReport,
+} from '../engine/scan.js';
+import { LIGHTHOUSE_CATEGORY_VALUES, type LighthouseCategory } from '../engine/lighthouse.js';
 import { createLogger } from '../logger/index.js';
 import type { Logger } from '../logger/index.js';
 import type { GenerationParams, ScanHeader, ScanHeaderType, WcagLevel, WcagVersion } from '../types.js';
@@ -164,6 +171,44 @@ function sanitizeLlm(raw: unknown): SanitizeResult<ScanOptions['llm']> {
   return { ok: true, value: llm };
 }
 
+function sanitizeLighthouse(raw: unknown): SanitizeResult<boolean | ScanLighthouseOptions> {
+  if (typeof raw === 'boolean') return { ok: true, value: raw };
+  if (!isPlainObject(raw)) {
+    return { ok: false, message: 'options.lighthouse must be a boolean or an object.' };
+  }
+  // Strict allowlist: only categories and includeRaw are accepted.
+  const out: ScanLighthouseOptions = {};
+  if (raw.categories !== undefined) {
+    if (
+      !Array.isArray(raw.categories) ||
+      !raw.categories.every(
+        (c): c is LighthouseCategory =>
+          typeof c === 'string' && LIGHTHOUSE_CATEGORY_VALUES.includes(c as LighthouseCategory),
+      )
+    ) {
+      return {
+        ok: false,
+        message: `options.lighthouse.categories must be an array of: ${LIGHTHOUSE_CATEGORY_VALUES.join(', ')}.`,
+      };
+    }
+    out.categories = raw.categories;
+  }
+  if (raw.includeRaw !== undefined) {
+    if (typeof raw.includeRaw !== 'boolean') {
+      return { ok: false, message: 'options.lighthouse.includeRaw must be a boolean.' };
+    }
+    out.includeRaw = raw.includeRaw;
+  }
+  // Same semantic rule the engine applies at scan time (e.g. accessibility is
+  // required); rejecting here turns a doomed job into an immediate 400.
+  try {
+    resolveLighthouseConfig(out);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+  return { ok: true, value: out };
+}
+
 function sanitizeHeaders(raw: unknown): SanitizeResult<ScanHeader[]> {
   if (!Array.isArray(raw)) return { ok: false, message: 'options.headers must be an array.' };
   const headers: ScanHeader[] = [];
@@ -204,12 +249,17 @@ function sanitizeOptions(raw: unknown): SanitizeResult<ScanOptions> {
     out.wcagLevel = raw.wcagLevel as WcagLevel;
   }
   if (raw.lighthouse !== undefined) {
-    if (typeof raw.lighthouse !== 'boolean') return { ok: false, message: 'options.lighthouse must be a boolean.' };
-    out.lighthouse = raw.lighthouse;
+    const lh = sanitizeLighthouse(raw.lighthouse);
+    if (!lh.ok) return lh;
+    out.lighthouse = lh.value;
   }
   if (raw.annotate !== undefined) {
     if (typeof raw.annotate !== 'boolean') return { ok: false, message: 'options.annotate must be a boolean.' };
     out.annotate = raw.annotate;
+  }
+  if (raw.screenshot !== undefined) {
+    if (typeof raw.screenshot !== 'boolean') return { ok: false, message: 'options.screenshot must be a boolean.' };
+    out.screenshot = raw.screenshot;
   }
   if (raw.headers !== undefined) {
     const h = sanitizeHeaders(raw.headers);

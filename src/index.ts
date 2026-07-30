@@ -9,6 +9,7 @@ export type {
   EngineOptions,
   OneShotScanOptions,
   ScanErrorCode,
+  ScanLighthouseOptions,
   ScanLlmOptions,
   ScanOptions,
   ScanProgressEvent,
@@ -31,9 +32,13 @@ export type {
 } from './types.js';
 export type { PageAnalysisResult } from './engine/playwright.js';
 export type {
+  LighthouseCategory,
   LighthouseIssue,
   LighthouseIssueElement,
   LighthouseIssuesSummary,
+  LighthousePerformanceMetrics,
+  LighthousePerformanceOpportunity,
+  LighthousePerformanceResult,
   LighthouseTransformedResult,
 } from './engine/lighthouse.js';
 export { renderHtmlReport } from './engine/html-report.js';

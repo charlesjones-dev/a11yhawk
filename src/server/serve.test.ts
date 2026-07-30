@@ -334,6 +334,44 @@ describe('createA11yHawkServer', () => {
     expect(rawDone).not.toContain(secret);
   });
 
+  it('passes sanitized lighthouse and screenshot options through to the engine', async () => {
+    const { base, fake } = await startServer(successScan);
+
+    const created = await postScan(base, {
+      url: 'https://example.com',
+      options: {
+        lighthouse: { categories: ['accessibility', 'performance'], includeRaw: true, chromeFlags: '--evil' },
+        screenshot: false,
+      },
+    });
+    expect(created.status).toBe(202);
+    const { id } = (await created.json()) as { id: string };
+    await pollUntil(base, id, (j) => j.status === 'completed');
+
+    const options = fake.scanCalls[0]?.options;
+    // Unknown lighthouse fields (chromeFlags) are stripped by the allowlist.
+    expect(options?.lighthouse).toEqual({ categories: ['accessibility', 'performance'], includeRaw: true });
+    expect(options?.screenshot).toBe(false);
+  });
+
+  it('rejects invalid lighthouse and screenshot options with 400', async () => {
+    const { base } = await startServer(successScan);
+    const url = 'https://example.com';
+
+    const cases: unknown[] = [
+      { lighthouse: 'yes' },
+      { lighthouse: { categories: ['seo'] } },
+      { lighthouse: { categories: ['performance'] } }, // accessibility is required
+      { lighthouse: { categories: [] } },
+      { lighthouse: { includeRaw: 'yes' } },
+      { screenshot: 'no' },
+    ];
+    for (const options of cases) {
+      const res = await postScan(base, { url, options });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it('rejects an oversized request body with 413', async () => {
     const { base } = await startServer(successScan);
     const huge = { url: `https://example.com/${'a'.repeat(70_000)}` };

@@ -27,7 +27,7 @@ It was extracted from the private `accesshawk-nuxt` monorepo's worker (expected 
 
 ## Architecture
 
-`src/engine/scan.ts` is the orchestrator. `A11yHawkEngine.scan()` runs: validate URL -> Playwright capture (`playwright.ts`: screenshot tiled to the LLM provider's image limits, CDP accessibility tree, HTML) -> Lighthouse audit (`lighthouse.ts`: subprocess, accessibility-only, reuses the browser via CDP port) -> LLM analysis (`llm.ts` + `prompts.ts`: OpenAI SDK against any OpenAI-compatible endpoint, OpenRouter default) -> parse and recompute -> markdown (`markdown-generator.ts`) -> screenshot annotation (`annotator.ts`).
+`src/engine/scan.ts` is the orchestrator. `A11yHawkEngine.scan()` runs: validate URL -> Playwright capture (`playwright.ts`: screenshot tiled to the LLM provider's image limits, CDP accessibility tree, HTML) -> Lighthouse audit (`lighthouse.ts`: subprocess, accessibility plus optional performance category, reuses the browser via CDP port) -> LLM analysis (`llm.ts` + `prompts.ts`: OpenAI SDK against any OpenAI-compatible endpoint, OpenRouter default) -> parse and recompute -> markdown (`markdown-generator.ts`) -> screenshot annotation (`annotator.ts`).
 
 Mode split: when `ScanOptions.llm` is present, Lighthouse failure is non-blocking (findings just enrich the prompt); when omitted (Lighthouse-only mode), Lighthouse is the sole analysis source and its failure is fatal, with `buildStructuredFromLighthouse` mapping severities (critical/serious/moderate/minor -> critical/high/medium/low). Annotation failure never fails a scan.
 
@@ -99,13 +99,15 @@ Topic-specific knowledge is stored in `docs/kb/` and loaded contextually based o
 
 When a KB file's frontmatter contains `related: [[other-file]]` cross-references, also read the related file(s) for full context.
 
-| Topic                 | File                                     | When to Load                                                                         |
-| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security |
-| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                      |
-| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                      |
-| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                      |
-| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning       |
+| Topic                 | File                                     | When to Load                                                                          |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security  |
+| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                       |
+| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                       |
+| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                       |
+| Lighthouse Engine     | docs/kb/engine/lighthouse.md             | `src/engine/lighthouse.ts`, `src/engine/scan.ts` — lighthouse, performance, bulk-mode |
+| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning        |
+| Vitest                | docs/kb/tools/vitest.md                  | `**/*.test.ts`, `vitest.config.ts` — testing, vitest, soak                            |
 
 <!-- kb-auto: enabled -->
 

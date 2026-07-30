@@ -25,8 +25,10 @@ import type {
 } from '../types.js';
 import { annotateScreenshot } from './annotator.js';
 import {
+  LIGHTHOUSE_CATEGORY_VALUES,
   lighthouseService,
   transformLighthouseToIssues,
+  type LighthouseCategory,
   type LighthouseIssue,
   type LighthouseTransformedResult,
 } from './lighthouse.js';
@@ -102,6 +104,22 @@ export interface ScanLlmOptions {
   debug?: boolean;
 }
 
+/** Object form of ScanOptions.lighthouse for configuring the audit. */
+export interface ScanLighthouseOptions {
+  /**
+   * Lighthouse categories to run, all from a single subprocess run and a
+   * single page load. Must include 'accessibility': it is the analysis
+   * source for the structured report. Default ['accessibility'].
+   */
+  categories?: LighthouseCategory[];
+  /**
+   * Attach the trimmed raw Lighthouse result (screenshot payloads and
+   * localization tables removed) to report.lighthouse.raw, for audits the
+   * engine does not map. Default false.
+   */
+  includeRaw?: boolean;
+}
+
 export interface ScanOptions {
   /** Omit entirely for Lighthouse-only mode (no API key required). */
   llm?: ScanLlmOptions;
@@ -111,8 +129,20 @@ export interface ScanOptions {
   wcagLevel?: WcagLevel;
   /** Custom request headers forwarded to the scanned page (plain values). */
   headers?: ScanHeader[];
-  /** Run the Lighthouse audit. Default true. */
-  lighthouse?: boolean;
+  /**
+   * Run the Lighthouse audit. Pass an object to select categories or opt in
+   * to the raw result; `true` and `{}` both mean the accessibility-only
+   * default. Default true.
+   */
+  lighthouse?: boolean | ScanLighthouseOptions;
+  /**
+   * Capture the full-page screenshot. Disable in Lighthouse-only mode for
+   * bulk scanning: capture, tiling, and annotation are skipped and
+   * report.screenshot / report.annotatedScreenshot are null, keeping memory
+   * flat across thousands of sequential scans. Cannot be disabled in LLM
+   * mode, where the screenshot feeds the visual analysis. Default true.
+   */
+  screenshot?: boolean;
   /** Draw issue bounding boxes on a copy of the screenshot. Default true. */
   annotate?: boolean;
   onProgress?: (event: ScanProgressEvent) => void;
@@ -188,6 +218,54 @@ function normalizeIssue(issue: Partial<AccessibilityIssue>, index: number): Acce
     resolvedByUserId: null,
     resolvedByDisplayName: null,
   };
+}
+
+/** Resolved per-scan Lighthouse settings; null when the audit is disabled. */
+interface ResolvedLighthouseConfig {
+  categories: LighthouseCategory[];
+  includeRaw: boolean;
+}
+
+/**
+ * Normalize ScanOptions.lighthouse (boolean | object) into run settings.
+ * Throws invalid-options on a bad category list so misconfiguration fails
+ * before any browser work. Exported for the server's request sanitizer,
+ * which applies the same rule at request time; not part of the public API.
+ */
+export function resolveLighthouseConfig(option: ScanOptions['lighthouse']): ResolvedLighthouseConfig | null {
+  if (option === false) return null;
+  if (option === undefined || option === true) {
+    return { categories: ['accessibility'], includeRaw: false };
+  }
+
+  // Validate as plain strings: JS callers can pass anything at runtime.
+  const known = LIGHTHOUSE_CATEGORY_VALUES as readonly string[];
+  const categories = [...new Set<string>(option.categories ?? ['accessibility'])];
+  if (categories.length === 0) {
+    throw new ScanError(
+      'invalid-options',
+      "lighthouse.categories must not be empty. Omit it (or pass ['accessibility']) for the default audit.",
+      false,
+    );
+  }
+  const unknown = categories.filter((c) => !known.includes(c));
+  if (unknown.length > 0) {
+    throw new ScanError(
+      'invalid-options',
+      `Unknown lighthouse categories: ${unknown.join(', ')}. Supported: ${LIGHTHOUSE_CATEGORY_VALUES.join(', ')}.`,
+      false,
+    );
+  }
+  if (!categories.includes('accessibility')) {
+    throw new ScanError(
+      'invalid-options',
+      "lighthouse.categories must include 'accessibility': it is the analysis source for the structured report.",
+      false,
+    );
+  }
+  // Canonical order keeps the subprocess argv deterministic.
+  categories.sort((a, b) => known.indexOf(a) - known.indexOf(b));
+  return { categories: categories as LighthouseCategory[], includeRaw: option.includeRaw === true };
 }
 
 /** Build a structured report from Lighthouse findings alone (no-LLM mode). */
@@ -291,7 +369,9 @@ export class A11yHawkEngine {
     const startTime = Date.now();
     const log = options.logger ?? this.logger;
     const llmMode = options.llm !== undefined;
-    const runLighthouse = options.lighthouse !== false;
+    // Throws invalid-options on a bad category list, before any browser work.
+    const lighthouseConfig = resolveLighthouseConfig(options.lighthouse);
+    const captureScreenshot = options.screenshot !== false;
     const wcagVersion = options.wcagVersion ?? '2.1';
     const wcagLevel = options.wcagLevel ?? 'AA';
     // Format is parsed by the prompt builder; keep "WCAG <version> - <level>".
@@ -307,10 +387,18 @@ export class A11yHawkEngine {
       }
     };
 
-    if (!llmMode && !runLighthouse) {
+    if (!llmMode && lighthouseConfig === null) {
       throw new ScanError(
         'invalid-options',
         'Nothing to run: provide options.llm for AI analysis or leave lighthouse enabled.',
+        false,
+      );
+    }
+
+    if (llmMode && !captureScreenshot) {
+      throw new ScanError(
+        'invalid-options',
+        'screenshot: false requires Lighthouse-only mode: the LLM analysis needs the screenshot for visual checks.',
         false,
       );
     }
@@ -355,6 +443,7 @@ export class A11yHawkEngine {
           (screenshot) => emit('capturing', 'Screenshot captured', screenshot),
           options.headers,
           log,
+          { captureScreenshot },
         )
         .catch((error: unknown) => {
           // A blocked navigation or redirect is an attack or misconfiguration,
@@ -373,8 +462,13 @@ export class A11yHawkEngine {
       // Lighthouse audit phase. Non-blocking in LLM mode, fatal in
       // Lighthouse-only mode where it is the sole analysis source.
       let lighthouseResult: LighthouseTransformedResult | null = null;
-      if (runLighthouse) {
-        emit('auditing', 'Running Lighthouse accessibility audit...');
+      if (lighthouseConfig) {
+        emit(
+          'auditing',
+          lighthouseConfig.categories.includes('performance')
+            ? 'Running Lighthouse accessibility + performance audit...'
+            : 'Running Lighthouse accessibility audit...',
+        );
         try {
           const cdpPort = this.playwright.getCDPPort() ?? undefined;
 
@@ -390,7 +484,11 @@ export class A11yHawkEngine {
             }
           }
 
-          const rawResult = await lighthouseService.runAccessibilityAudit(lighthouseTarget, cdpPort, log);
+          const rawResult = await lighthouseService.runAudit(
+            lighthouseTarget,
+            { cdpPort, categories: lighthouseConfig.categories, includeRaw: lighthouseConfig.includeRaw },
+            log,
+          );
           lighthouseResult = transformLighthouseToIssues(rawResult);
           log.info('Lighthouse audit complete', {
             issueCount: lighthouseResult.issues.length,

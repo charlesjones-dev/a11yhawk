@@ -435,8 +435,17 @@ export class PlaywrightService {
     onScreenshot?: (screenshotBase64: string) => void,
     customHeaders?: ScanHeader[],
     jobLogger?: Logger,
+    analyzeOptions?: {
+      /**
+       * Capture the full-page screenshot (and its LLM tiles). When false the
+       * animation scroll, capture, and tiling are all skipped; the result
+       * carries a null buffer and no tiles. Default true.
+       */
+      captureScreenshot?: boolean;
+    },
   ): Promise<PageAnalysisResult> {
     const log = jobLogger || defaultLogger;
+    const captureScreenshot = analyzeOptions?.captureScreenshot ?? true;
 
     // Concurrency limiting to prevent memory spikes
     if (this.activeAnalyses >= this.maxConcurrentAnalyses) {
@@ -587,15 +596,24 @@ export class PlaywrightService {
           log.info('Page navigation complete', { title, navTimeMs: navTime });
           onProgress?.(`Analyzing: "${title}"`);
 
-          // Scroll through the page slowly to trigger scroll-based animations before screenshot
-          // This ensures lazy-loaded content and scroll-reveal animations are visible
-          onProgress?.('Scrolling page to trigger animations...');
-          log.debug('Scrolling page to trigger animations');
+          // Screenshot pipeline: animation scroll, full-page capture, and LLM
+          // tiling. Skipped entirely when the caller disabled screenshots
+          // (bulk Lighthouse-only scans, where the visual outputs are unused);
+          // that path never allocates the page-sized buffers and saves the
+          // scroll time. The scroll's lazy-load side effects are only needed
+          // for visual fidelity, which is moot without a capture.
+          let screenshotBuffer: Buffer | null = null;
+          let screenshotTiles: string[] = [];
+          if (captureScreenshot) {
+            // Scroll through the page slowly to trigger scroll-based animations before screenshot
+            // This ensures lazy-loaded content and scroll-reveal animations are visible
+            onProgress?.('Scrolling page to trigger animations...');
+            log.debug('Scrolling page to trigger animations');
 
-          // Execute scroll animation in browser context with adaptive timing
-          // Shorter pages get faster scroll delays to reduce scan time
-          // Using string to avoid TypeScript DOM type errors in server context
-          const scrollInfo = (await page.evaluate(`(async () => {
+            // Execute scroll animation in browser context with adaptive timing
+            // Shorter pages get faster scroll delays to reduce scan time
+            // Using string to avoid TypeScript DOM type errors in server context
+            const scrollInfo = (await page.evaluate(`(async () => {
             const scrollHeight = document.documentElement.scrollHeight;
             const viewportHeight = window.innerHeight;
             const scrollRatio = scrollHeight / viewportHeight;
@@ -638,34 +656,36 @@ export class PlaywrightService {
             return { scrollRatio, skipped: false };
           })()`)) as { scrollRatio: number; skipped: boolean };
 
-          // Adaptive wait after scroll - shorter for pages that didn't need much scrolling
-          const postScrollWait = scrollInfo.skipped ? 100 : scrollInfo.scrollRatio <= 2 ? 250 : 500;
-          await page.waitForTimeout(postScrollWait);
+            // Adaptive wait after scroll - shorter for pages that didn't need much scrolling
+            const postScrollWait = scrollInfo.skipped ? 100 : scrollInfo.scrollRatio <= 2 ? 250 : 500;
+            await page.waitForTimeout(postScrollWait);
 
-          // Capture full-page screenshot - using JPEG with quality compression for memory efficiency
-          onProgress?.('Capturing full-page screenshot...');
-          log.info('Capturing full-page screenshot');
-          const screenshotBuffer = await page.screenshot({
-            fullPage: true, // Capture entire scrollable page for comprehensive accessibility scanning
-            type: 'jpeg',
-            quality: 60, // Reduced quality for token efficiency - still readable for contrast/a11y analysis
-          });
+            // Capture full-page screenshot - using JPEG with quality compression for memory efficiency
+            onProgress?.('Capturing full-page screenshot...');
+            log.info('Capturing full-page screenshot');
+            screenshotBuffer = await page.screenshot({
+              fullPage: true, // Capture entire scrollable page for comprehensive accessibility scanning
+              type: 'jpeg',
+              quality: 60, // Reduced quality for token efficiency - still readable for contrast/a11y analysis
+            });
 
-          // Split into tiles if needed to fit LLM provider limits (varies by provider)
-          const maxDimension = getMaxImageDimension(modelId);
-          const { tiles: screenshotTiles, tileCount } = await splitImageIntoTiles(screenshotBuffer, maxDimension, log);
+            // Split into tiles if needed to fit LLM provider limits (varies by provider)
+            const maxDimension = getMaxImageDimension(modelId);
+            const split = await splitImageIntoTiles(screenshotBuffer, maxDimension, log);
+            screenshotTiles = split.tiles;
 
-          if (this.debug) {
-            if (tileCount > 1) {
-              onProgress?.(`Screenshot split into ${tileCount} tiles for LLM analysis`);
+            if (this.debug) {
+              if (split.tileCount > 1) {
+                onProgress?.(`Screenshot split into ${split.tileCount} tiles for LLM analysis`);
+              }
             }
-          }
 
-          // Stream the first tile (or full image if no split) immediately via callback
-          // This sends a preview to the client before LLM processing
-          const previewTile = screenshotTiles[0];
-          if (previewTile) {
-            onScreenshot?.(previewTile);
+            // Stream the first tile (or full image if no split) immediately via callback
+            // This sends a preview to the client before LLM processing
+            const previewTile = screenshotTiles[0];
+            if (previewTile) {
+              onScreenshot?.(previewTile);
+            }
           }
 
           // Get Accessibility Tree using CDP (Chrome DevTools Protocol)

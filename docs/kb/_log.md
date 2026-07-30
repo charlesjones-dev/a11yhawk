@@ -23,3 +23,8 @@ Chronological record of KB operations. Append-only — newest entries at the bot
 - Created: `tools/dependency-audit.md`
 - Updated: `_global-learnings.md` (1 rule), `_index.md`, CLAUDE.md KB table, `tools/releases-and-publishing.md` (cross-ref)
 - Global learnings: 1 added (Prettier format:check gates all markdown incl. CLAUDE.md)
+
+## [2026-07-29] learn | v0.2.0 bulk-mode feature session learnings captured
+- Created: `engine/lighthouse.md`, `tools/vitest.md`
+- Updated: `_index.md`, CLAUDE.md KB table
+- Global learnings: 0 added (both learnings are scoped, not cross-cutting)

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.2.0] - 2026-07-29
+
+Additive release aimed at library consumers running bulk scans. No breaking changes: `scan()`, `A11yHawkEngine`, `ScanReport`, option names, and error codes are all unchanged, and omitting the new options behaves exactly like `0.1.4` (the only visible difference is the new `lighthouseVersion` field on `report.lighthouse`).
+
+### Added
+
+- **Lighthouse performance category.** `ScanOptions.lighthouse` now also accepts an object: `lighthouse: { categories: ['accessibility', 'performance'] }` runs both categories from a single Lighthouse subprocess and a single page load (the boolean form keeps working; `true` ≡ `{ categories: ['accessibility'] }`). Results land additively on `report.lighthouse.performance` as a typed `LighthousePerformanceResult`: category score (0-100 or `null` when uncomputable), FCP/LCP/CLS/TBT/Speed Index metrics, and the top savings-bearing opportunities (audit id, title, estimated ms/bytes; sorted, capped at 10). Works with or without an LLM key. `categories` must include `'accessibility'` (it is the analysis source for the structured report); a bad list throws the existing `invalid-options` code, and run failures keep surfacing as `lighthouse-failed`. `StructuredScanOutput` is untouched.
+- **Performance runs are serialized engine-wide.** Runs that include the performance category execute one at a time regardless of `setConcurrency(n)`, because parallel traces contend for CPU and skew metrics. Performance runs also get a 60s Lighthouse timeout (accessibility-only runs keep 30s).
+- **`ScanOptions.screenshot`.** `screenshot: false` skips screenshot capture entirely (capture, tiling, annotation, and the pre-capture scroll), so bulk Lighthouse-only crawls hold no image buffers per scan; `report.screenshot` and `report.annotatedScreenshot` come back `null`. Lighthouse-only mode only: combining it with `llm` throws `invalid-options` since the LLM analysis needs the screenshot.
+- **`report.lighthouse.lighthouseVersion`.** The Lighthouse version that produced the result, for downstream report provenance.
+- **`lighthouse: { includeRaw: true }`.** Opt-in escape hatch attaching the raw Lighthouse result as `report.lighthouse.raw` for audits the engine does not map, trimmed of screenshot payloads and localization tables so it stays bulk-safe.
+- **Server passthrough.** `a11yhawk serve` accepts the new `options.lighthouse` object form and `options.screenshot` through its strict allowlist; invalid category lists are rejected with `400` at submission time.
+- **Bulk-mode soak test.** Opt-in regression test (`A11YHAWK_SOAK=1 A11YHAWK_SOAK_SCANS=1000 NODE_OPTIONS=--expose-gc npx vitest run src/engine/scan.soak.test.ts`) running sequential Lighthouse-only scans on one warm engine against a local fixture server, asserting flat memory and stable handle counts.
+
+### Fixed
+
+- **Lighthouse timeout kill escalation.** A timed-out Lighthouse subprocess that ignores `SIGTERM` is now `SIGKILL`ed after a 5s grace period, so long-lived hosts cannot accumulate zombie audit processes.
+
 ## [0.1.4] - 2026-07-21
 
 ### Added
@@ -66,6 +84,7 @@ First functional release. The scan engine, its library API, the CLI, server mode
 
 - Initial name-reserving stub. Published to npm and unpublished the same day (metadata correction); superseded by `0.0.2`. Per npm policy the version number remains permanently unusable.
 
+[0.2.0]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.2.0
 [0.1.4]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.4
 [0.1.3]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.3
 [0.1.2]: https://github.com/charlesjones-dev/a11yhawk/releases/tag/v0.1.2

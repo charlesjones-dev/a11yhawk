@@ -21,7 +21,7 @@ Runs entirely on your own infrastructure. No accounts, no telemetry, no phone-ho
        |
        v
   Lighthouse audit
-  (deterministic, accessibility-only)
+  (deterministic; accessibility + optional performance)
        |
        v
   LLM analysis
@@ -37,7 +37,7 @@ Runs entirely on your own infrastructure. No accounts, no telemetry, no phone-ho
 ```
 
 - **Playwright capture**: full-page screenshot (tiled to your LLM provider's image limits), Chrome DevTools accessibility tree, and HTML sanitized down to its accessibility-relevant structure.
-- **Lighthouse**: accessibility-category audits in a subprocess, reusing the same browser over CDP. Findings are mapped to WCAG criteria and fed into the LLM prompt for cross-referencing.
+- **Lighthouse**: accessibility-category audits in a subprocess, reusing the same browser over CDP. Findings are mapped to WCAG criteria and fed into the LLM prompt for cross-referencing. Opt in to the performance category and both run from the same page load (see [Lighthouse performance category](#lighthouse-performance-category)).
 - **LLM analysis** (optional): the model receives the screenshot tiles, compact accessibility tree, sanitized HTML, Lighthouse findings, and a condensed matrix of every WCAG criterion for your chosen version + level, and returns structured issues with remediation guidance. Scores and statistics are recomputed by the engine from the actual findings, never trusted from the model.
 - **Lighthouse-only mode**: omit the LLM config and you get a deterministic, no-API-key scan in a few seconds.
 
@@ -116,21 +116,24 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 
 **ScanOptions**
 
-| Option                 | Type                             | Default                        | Notes                                                                                        |
-| ---------------------- | -------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
-| `llm`                  | `ScanLlmOptions`                 | omitted                        | Omit entirely for Lighthouse-only mode                                                       |
-| `llm.apiKey`           | `string`                         | required in LLM mode           | Key for the configured endpoint                                                              |
-| `llm.model`            | `string`                         | `anthropic/claude-sonnet-5`    | Any model id your endpoint accepts                                                           |
-| `llm.baseUrl`          | `string`                         | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint                                                               |
-| `llm.generationParams` | `GenerationParams`               | engine defaults                | temperature, topP, frequencyPenalty, maxTokens                                               |
-| `llm.debug`            | `boolean`                        | `false`                        | Verbose prompt/response logging                                                              |
-| `wcagVersion`          | `'2.0' \| '2.1' \| '2.2'`        | `'2.1'`                        |                                                                                              |
-| `wcagLevel`            | `'A' \| 'AA' \| 'AAA'`           | `'AA'`                         |                                                                                              |
-| `headers`              | `ScanHeader[]`                   | none                           | Custom request headers (cookies, auth) sent to the page                                      |
-| `lighthouse`           | `boolean`                        | `true`                         | Disable to skip the Lighthouse audit (LLM mode only)                                         |
-| `annotate`             | `boolean`                        | `true`                         | Draw severity-colored boxes on a copy of the screenshot                                      |
-| `onProgress`           | `(e: ScanProgressEvent) => void` | none                           | Stages: validating, capturing, auditing, analyzing, processing, annotating, complete, failed |
-| `logger`               | `Logger`                         | console logger                 | Bring your own structured logger                                                             |
+| Option                  | Type                               | Default                        | Notes                                                                                        |
+| ----------------------- | ---------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `llm`                   | `ScanLlmOptions`                   | omitted                        | Omit entirely for Lighthouse-only mode                                                       |
+| `llm.apiKey`            | `string`                           | required in LLM mode           | Key for the configured endpoint                                                              |
+| `llm.model`             | `string`                           | `anthropic/claude-sonnet-5`    | Any model id your endpoint accepts                                                           |
+| `llm.baseUrl`           | `string`                           | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint                                                               |
+| `llm.generationParams`  | `GenerationParams`                 | engine defaults                | temperature, topP, frequencyPenalty, maxTokens                                               |
+| `llm.debug`             | `boolean`                          | `false`                        | Verbose prompt/response logging                                                              |
+| `wcagVersion`           | `'2.0' \| '2.1' \| '2.2'`          | `'2.1'`                        |                                                                                              |
+| `wcagLevel`             | `'A' \| 'AA' \| 'AAA'`             | `'AA'`                         |                                                                                              |
+| `headers`               | `ScanHeader[]`                     | none                           | Custom request headers (cookies, auth) sent to the page                                      |
+| `lighthouse`            | `boolean \| ScanLighthouseOptions` | `true`                         | `false` skips the audit (LLM mode only); an object selects categories, see below             |
+| `lighthouse.categories` | `LighthouseCategory[]`             | `['accessibility']`            | `'accessibility' \| 'performance'`; must include `'accessibility'`; one run, one page load   |
+| `lighthouse.includeRaw` | `boolean`                          | `false`                        | Attach the trimmed raw Lighthouse result as `report.lighthouse.raw`                          |
+| `screenshot`            | `boolean`                          | `true`                         | `false` skips screenshot capture entirely (Lighthouse-only mode; see Bulk scanning)          |
+| `annotate`              | `boolean`                          | `true`                         | Draw severity-colored boxes on a copy of the screenshot                                      |
+| `onProgress`            | `(e: ScanProgressEvent) => void`   | none                           | Stages: validating, capturing, auditing, analyzing, processing, annotating, complete, failed |
+| `logger`                | `Logger`                           | console logger                 | Bring your own structured logger                                                             |
 
 **EngineOptions**
 
@@ -149,12 +152,74 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 | `markdown`            | `string`                              | Human-readable report                                                                                      |
 | `screenshot`          | `Buffer \| null`                      | Full-page JPEG                                                                                             |
 | `annotatedScreenshot` | `Buffer \| null`                      | Issues boxed on the page, when annotation resolved any selectors                                           |
-| `lighthouse`          | `LighthouseTransformedResult \| null` | Raw-ish Lighthouse findings mapped to WCAG                                                                 |
+| `lighthouse`          | `LighthouseTransformedResult \| null` | Lighthouse findings mapped to WCAG, plus `lighthouseVersion` and (when requested) `performance` / `raw`    |
 | `usage`               | `ScanUsage \| null`                   | Tokens + cost in USD; `null` in Lighthouse-only mode                                                       |
 | `finalUrl`            | `string`                              | Guard-validated post-redirect URL that was actually analyzed                                               |
 | `durationMs`          | `number`                              |                                                                                                            |
 
 Use `renderHtmlReport(report)` to turn any `ScanReport` into a single self-contained HTML document (inline CSS/JS, images as data URIs, renders from `file://`, itself WCAG AA accessible).
+
+### Lighthouse performance category
+
+Add `'performance'` to `lighthouse.categories` to collect performance metrics from the **same Lighthouse run and page load** as the accessibility audit; no second pass, no extra navigation. Works in Lighthouse-only mode (no API key) and in LLM mode alike:
+
+```js
+const engine = new A11yHawkEngine();
+const report = await engine.scan(url, {
+  lighthouse: { categories: ['accessibility', 'performance'] },
+  screenshot: false, // optional: skip capture in bulk Lighthouse-only scans
+});
+
+report.lighthouse.performance.score; // 0-100 (or null if uncomputable)
+report.lighthouse.performance.metrics; // FCP/LCP/TBT/Speed Index (ms), CLS
+report.lighthouse.performance.opportunities; // top improvements, largest first
+report.lighthouse.lighthouseVersion; // provenance, e.g. "13.4.0"
+```
+
+`report.lighthouse.performance` is a `LighthousePerformanceResult`:
+
+| Field                              | Type             | Notes                                                                                                                                      |
+| ---------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `score`                            | `number \| null` | Category score 0-100; `null` when Lighthouse could not compute one (metrics may remain)                                                    |
+| `metrics.firstContentfulPaintMs`   | `number?`        | FCP, milliseconds                                                                                                                          |
+| `metrics.largestContentfulPaintMs` | `number?`        | LCP, milliseconds                                                                                                                          |
+| `metrics.cumulativeLayoutShift`    | `number?`        | CLS, unitless, 3 decimals                                                                                                                  |
+| `metrics.totalBlockingTimeMs`      | `number?`        | TBT, milliseconds                                                                                                                          |
+| `metrics.speedIndexMs`             | `number?`        | Speed Index, milliseconds                                                                                                                  |
+| `opportunities[]`                  | array            | Failing audits with an estimate: `auditId`, `title`, `estimatedSavingsMs?`, `estimatedSavingsBytes?`; sorted by time savings, capped at 10 |
+
+Notes:
+
+- `'accessibility'` is always required in `categories`: it is the analysis source for the structured report. Omitting it throws `ScanError` `invalid-options`.
+- A failed run surfaces through the existing `lighthouse-failed` code (fatal in Lighthouse-only mode, non-blocking in LLM mode); requesting performance adds no new error shapes.
+- **Performance runs are serialized engine-wide**, regardless of `setConcurrency(n)`: parallel traces on one machine contend for CPU and skew FCP/LCP/TBT. Other scan stages still run concurrently, so for the strictest metric fidelity run performance scans at concurrency 1 on an otherwise idle machine.
+- Performance runs get a 60s Lighthouse timeout (accessibility-only runs keep 30s).
+- `lighthouse: { includeRaw: true }` attaches the raw Lighthouse result as `report.lighthouse.raw` for audits the engine does not map, trimmed of its largest dead weight (full-page screenshot artifact, screenshot audits, localization tables).
+- The structured report (`report.structured`) stays accessibility-only; performance data lives on `report.lighthouse` and is not persisted into `StructuredScanOutput`.
+
+### Bulk scanning
+
+For crawling many pages, hold one `A11yHawkEngine` for the whole run instead of calling the one-shot `scan()` per page, and disable outputs you will not use:
+
+```js
+const engine = new A11yHawkEngine();
+try {
+  for (const url of urls) {
+    const report = await engine.scan(url, {
+      screenshot: false, // no capture, no tiling, no annotation, no Buffers in the report
+      lighthouse: { categories: ['accessibility', 'performance'] },
+    });
+    await persist(report);
+  }
+} finally {
+  await engine.close();
+}
+```
+
+- `screenshot: false` skips screenshot capture entirely; `report.screenshot` and `report.annotatedScreenshot` are `null` and memory stays flat across thousands of sequential scans. It requires Lighthouse-only mode (the LLM analysis needs the screenshot), so combining it with `llm` throws `invalid-options`.
+- Chromium shuts down whenever no scan is in flight and relaunches on the next one, returning its native memory to the OS between sequential scans by design. Overlapping scans (`setConcurrency(n)` > 1 with concurrent callers) share one warm browser.
+- Every scan-time failure is a `ScanError` with a `retryable` flag; map `retryable: true` onto your crawler's retry queue and drop the rest.
+- The repo carries an opt-in soak test asserting flat memory and stable handle counts across sequential scans on one engine: `A11YHAWK_SOAK=1 A11YHAWK_SOAK_SCANS=1000 NODE_OPTIONS=--expose-gc npx vitest run src/engine/scan.soak.test.ts`.
 
 ### Error handling
 
@@ -336,7 +401,7 @@ curl -s localhost:4000/scans/$id | jq '{status, score: .report.structured.overal
 curl -s localhost:4000/scans/$id/report.html -o report.html
 ```
 
-The `options` object accepts only `llm { apiKey, model, baseUrl, generationParams }`, `wcagVersion`, `wcagLevel`, `headers`, `lighthouse`, and `annotate`; any other field is ignored. In the JSON report, screenshots come back as base64 `data:` URIs rather than raw bytes, and a submitted `llm.apiKey` is never echoed back in any response.
+The `options` object accepts only `llm { apiKey, model, baseUrl, generationParams }`, `wcagVersion`, `wcagLevel`, `headers`, `lighthouse` (boolean or `{ categories, includeRaw }`, same semantics as the library option), `screenshot`, and `annotate`; any other field is ignored. In the JSON report, screenshots come back as base64 `data:` URIs rather than raw bytes, and a submitted `llm.apiKey` is never echoed back in any response.
 
 ### Configuration
 
