@@ -22,4 +22,10 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run test:run
+      - name: Install Chromium for browser regression tests
+        if: matrix.node == 24
+        run: npx playwright install --with-deps chromium-headless-shell
+      - name: Test browser connection after long uptime
+        if: matrix.node == 24
+        run: A11YHAWK_BROWSER_TEST=1 npx vitest run src/engine/playwright.integration.test.ts
       - run: npm run build
