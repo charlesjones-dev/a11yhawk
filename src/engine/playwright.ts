@@ -354,8 +354,9 @@ export class PlaywrightService {
         timeout: 30000, // 30 second timeout for browser launch
       });
 
-      // Connect to the browser server to get a Browser instance for page operations
-      this.browser = await chromium.connect(this.browserServer.wsEndpoint());
+      // Playwright 1.57's implicit deadline expires after ~24.9 days of process
+      // uptime. An explicit timeout keeps connections working in long-lived hosts.
+      this.browser = await chromium.connect(this.browserServer.wsEndpoint(), { timeout: 30_000 });
 
       log.info('Browser server ready', { cdpPort: this.cdpPort });
     }

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.2.1] - 2026-09-07
+
+### Fixed
+
+- **Browser connections after long uptime.** Set an explicit 30-second timeout when connecting to Chromium. This avoids Playwright 1.57's default deadline expiring after approximately 24.9 days of process uptime, which caused scans to fail immediately with `browserType.connect: Timeout undefinedms exceeded`.
+
+### Added
+
+- **Long-uptime browser regression test.** An opt-in test uses real Chromium with a simulated 28-day process clock. Run it with `A11YHAWK_BROWSER_TEST=1 npx vitest run src/engine/playwright.integration.test.ts` after installing Playwright Chromium.
+
 ## [0.2.0] - 2026-07-29
 
 Additive release aimed at library consumers running bulk scans. No breaking changes: `scan()`, `A11yHawkEngine`, `ScanReport`, option names, and error codes are all unchanged, and omitting the new options behaves exactly like `0.1.4` (the only visible difference is the new `lighthouseVersion` field on `report.lighthouse`).
