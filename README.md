@@ -495,9 +495,11 @@ The directory also holds two deployment templates: `docker-compose.yml` (server 
 
 ## Output formats
 
-- **`structured`** (JSON): overall score (0-100, recomputed from WCAG coverage), per-severity statistics, WCAG coverage with pass/fail per criterion, issues with location/selector, code context, impact, and remediation, passed checks. Stable shape; treat as the source of truth.
+- **`structured`** (JSON): overall score (0-100: the percent of checked WCAG criteria with no issues found, recomputed by the engine; the Lighthouse accessibility score in Lighthouse-only mode), per-severity statistics, WCAG coverage marking each checked criterion as issues found or no issues found (`passed`), issues with location/selector, code context, impact, and remediation, passed checks. Stable shape; treat as the source of truth.
 - **`markdown`**: the same content as a readable report.
 - **HTML** (via `renderHtmlReport`): a single dark-theme file with score ring, severity breakdown, sortable/collapsible issues with client-side resolve tracking (localStorage), and the annotated screenshot. Attach it to CI artifacts, tickets, or email; it has zero external dependencies.
+
+Reports describe what was checked and what was found on one page. Automated and AI checks find WCAG failures but cover only part of WCAG, so a scan cannot establish conformance, and the reports say so: they are not a compliance certification.
 
 ## Roadmap
 

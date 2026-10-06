@@ -32,6 +32,11 @@ const SEVERITY_META: Record<AccessibilityIssue['severity'], { label: string; ran
   low: { label: 'Low', rank: 3 },
 };
 
+/** What the scan's checks were, for the scope notes: Lighthouse-only scans have no AI review. */
+function checksLabel(structured: StructuredScanOutput): string {
+  return structured.metadata?.engineMode === 'lighthouse-only' ? 'automated checks' : 'automated and AI checks';
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
@@ -51,6 +56,10 @@ function escapeHtml(value: unknown): string {
 /** True only for http(s) URLs. Anything else is rendered as text, never linked. */
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 /** Package version for the footer, read at runtime. Empty string if unavailable. */
@@ -253,9 +262,11 @@ function renderIssue(issue: AccessibilityIssue, index: number, coverageName: Map
   const criterion = issue.wcagCriteria.trim();
   const name = coverageName.get(criterion);
   const chipText = name && !criterion.includes(name) ? `${criterion} ${name}` : criterion;
-  const chip = criterion
-    ? `<span class="wcag-chip">${escapeHtml(chipText)}<span class="wcag-level">${escapeHtml(issue.wcagLevel)}</span></span>`
+  // The level belongs to a criterion; best-practice items without one show no level
+  const level = /^\d+\.\d+\.\d+/.test(criterion)
+    ? `<span class="wcag-level">${escapeHtml(issue.wcagLevel)}</span>`
     : '';
+  const chip = criterion ? `<span class="wcag-chip">${escapeHtml(chipText)}${level}</span>` : '';
 
   return `<details
         class="issue"
@@ -294,8 +305,8 @@ function renderIssues(structured: StructuredScanOutput): string {
       <p class="eyebrow">Findings</p>
       <h2 id="issues-h" class="section-title">Issues</h2>
       <div class="card empty-state">
-        <p class="empty-title">No accessibility issues detected</p>
-        <p class="fine-print">Nothing was flagged by this scan. Manual testing is still recommended for full WCAG conformance.</p>
+        <p class="empty-title">This scan found no issues</p>
+        <p class="fine-print">${escapeHtml(capitalize(checksLabel(structured)))} cover only part of WCAG, so also test with a keyboard and a screen reader.</p>
       </div>
     </section>`;
   }
@@ -357,8 +368,8 @@ function renderPassedCheck(check: PassedCheck): string {
 
 function renderCoverageRow(row: WCAGCoverage): string {
   const status = row.passed
-    ? '<span class="status status-pass">Passed</span>'
-    : '<span class="status status-fail">Failed</span>';
+    ? '<span class="status status-pass">No issues found</span>'
+    : '<span class="status status-fail">Issues found</span>';
   return `<tr>
               <td class="mono">${escapeHtml(row.criteriaId)}</td>
               <td>${escapeHtml(row.name)}</td>
@@ -381,18 +392,21 @@ function renderReference(structured: StructuredScanOutput): string {
         </details>`
     : '';
 
+  // Lighthouse-only coverage lists only the criteria Lighthouse found issues under.
+  const coverageLabel =
+    structured.metadata?.engineMode === 'lighthouse-only' ? 'WCAG criteria with issues found' : 'WCAG criteria checked';
   const coverage = hasCoverage
     ? `<details class="fold">
-          <summary>WCAG coverage <span class="count-pill">${structured.wcagCoverage.length}</span></summary>
+          <summary>${escapeHtml(coverageLabel)} <span class="count-pill">${structured.wcagCoverage.length}</span></summary>
           <div class="table-scroll">
             <table class="coverage">
-              <caption class="visually-hidden">WCAG criteria coverage</caption>
+              <caption class="visually-hidden">${escapeHtml(coverageLabel)} and the result for each</caption>
               <thead>
                 <tr>
                   <th scope="col">Criterion</th>
                   <th scope="col">Name</th>
                   <th scope="col">Level</th>
-                  <th scope="col">Status</th>
+                  <th scope="col">Result</th>
                 </tr>
               </thead>
               <tbody>
@@ -405,7 +419,7 @@ function renderReference(structured: StructuredScanOutput): string {
 
   return `<section class="wrap section" aria-labelledby="ref-h">
       <p class="eyebrow">Reference</p>
-      <h2 id="ref-h" class="section-title">Passed checks and WCAG coverage</h2>
+      <h2 id="ref-h" class="section-title">Passed checks and WCAG criteria</h2>
       ${passed}
       ${coverage}
     </section>`;
@@ -433,6 +447,7 @@ function renderFooter(report: ScanReport, version: string): string {
       <div class="footer-stats">
         ${stats.join('\n        ')}
       </div>
+      <p class="fine-print">This report covers one page and lists what ${escapeHtml(checksLabel(report.structured))} found. It is not a compliance certification.</p>
       <p class="footer-credit">${credit}</p>
     </footer>`;
 }

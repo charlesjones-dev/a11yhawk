@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.3.0] - Unreleased
+
+Report text and custom header handling change in ways hosts and report readers can see. `StructuredScanOutput` and the other result types keep their shape; only their doc comments changed.
+
+### Security
+
+- **Custom scan headers are scoped to the scan target's origin.** Header and bearer-token entries were set as context-wide `extraHTTPHeaders`, so the browser sent them with every request the scanned page made, including third-party scripts, CDNs, and analytics. A context route now adds them only to requests whose origin (scheme, host, and port) matches the scan URL; subdomains and the `www`/bare variant do not match. The annotation pass stays scoped to the original scan URL even when the page redirected elsewhere. Cookie entries are still set as cookies for the scan URL, and a `Cookie` header entry is now converted to cookies the same way, because Playwright drops `Cookie` from route header overrides. The SSRF request guard is unchanged and still decides every request. Residual gap: Playwright re-sends a request's headers on its redirect hops, so a same-origin URL that redirects to another origin still delivers them to the redirect target. WebSocket handshakes are not routed and do not receive custom headers.
+
+### Changed
+
+- **Reports describe what was checked and what was found, never a compliance outcome.** In the markdown report, "WCAG AA Compliance 80% (40/50 criteria)" is now "Criteria with no issues found 40 of 50 (80%)", "WCAG Compliance Matrix" is now "WCAG criteria checked", and the "Expected Impact" lines that projected compliance percentages are gone from the remediation roadmap. The introduction and summary sentences are rewritten as plain statements of what the scan found, the AI analysis line no longer names A11yHawk (hosts show the report under their own name), and emoji are replaced with text. Every report now ends with a note that it covers one page and is not a compliance certification. The HTML report labels criteria "No issues found" or "Issues found" instead of "Passed" or "Failed".
+- **Criteria table severity.** The markdown table's Priority column said High for every failing criterion. It is now "Highest severity", taken from the most severe issue mapped to the criterion.
+- **Lighthouse-only reports** no longer show an "AI Analysis" heading or a share of criteria with no issues (Lighthouse lists failing audits only), and list failed criteria with their WCAG names and levels instead of Level A for all of them.
+- **LLM prompt.** The model is told not to fail 2.4.5 Multiple Ways, 2.4.8 Location, 2.4.1 Bypass Blocks, or 3.3.5 Help without evidence on the page, to report a missing `<main>` landmark as a low-severity best practice, and to avoid compliance claims and filler in issue text. The issue-count quotas ("if you find fewer than 5 issues, you are likely missing problems") are gone, and the target size and focus contrast guidance now cites the right criteria (2.5.8 at AA, 2.5.5 at AAA, 1.4.11 for focus indicator contrast).
+
+### Fixed
+
+- **WCAG 2.1 criteria list.** 2.2.6 Timeouts and 2.3.3 Animation from Interactions (both AAA) were missing, so WCAG 2.1 and 2.2 Level AAA scans assessed 76 and 84 criteria instead of 78 and 86. A test now pins the per-version, per-level counts to W3C's.
+- **Lighthouse audit mapping.** Checked against the axe-core 4.12 rule tags and corrected, for example `video-caption` to 1.2.2 (was 2.2.2), `target-size` to 2.5.8 (was 2.5.5), `frame-title` to 4.1.2 (was 1.1.1), and `label-content-name-mismatch` to 2.5.3 (was 2.4.6); audits Lighthouse runs but the map lacked, such as `link-in-text-block` and `td-has-header`, are added. Audits axe tags best-practice, such as `landmark-one-main`, `heading-order`, and `tabindex`, no longer claim a WCAG criterion and get minor severity, so Lighthouse-only reports list them as low-severity best practice instead of a failed criterion (or an `unknown` coverage row).
+- **Lighthouse cross-reference.** Best-practice audits have no WCAG criterion, so they never matched an AI finding: a report could show 0 Lighthouse-confirmed issues while Lighthouse flagged the same missing `<main>` landmark the model reported. Matching now also uses each best-practice audit's related criteria (1.3.1 and 2.4.1 for a missing main landmark), and `lighthouseWcagCriteria` no longer contains `"unknown"`.
+
 ## [0.2.1] - 2026-09-07
 
 ### Fixed

@@ -68,6 +68,11 @@ export interface WCAGCoverage {
   criteriaId: string;
   name: string;
   level: 'A' | 'AA' | 'AAA';
+  /**
+   * True when the scan found no issues for this criterion, including criteria
+   * that do not apply to the page or cannot be judged from it. Not a statement
+   * that the page conforms to the criterion.
+   */
   passed: boolean;
   /** Issue IDs if failed. */
   issues?: string[];
@@ -88,7 +93,11 @@ export interface ScanStatistics {
  * Structured scan output - the machine-readable source of truth for a scan.
  */
 export interface StructuredScanOutput {
-  /** Overall accessibility score (0-100). */
+  /**
+   * Percent of checked WCAG criteria with no issues found (0-100), recomputed
+   * from wcagCoverage. In Lighthouse-only mode it is the Lighthouse
+   * accessibility score instead, since coverage there lists failures only.
+   */
   overallScore: number;
   url: string;
   /** ISO timestamp of the scan. */
@@ -105,7 +114,12 @@ export interface StructuredScanOutput {
     userAgent?: string;
     [key: string]: unknown;
   };
-  /** WCAG criteria detected by Lighthouse (for cross-referencing with AI findings). */
+  /**
+   * WCAG criteria Lighthouse found issues under, for cross-referencing with AI
+   * findings. Also includes the related criteria of best-practice audits (such
+   * as 1.3.1 and 2.4.1 for a missing main landmark), which have no criterion
+   * of their own.
+   */
   lighthouseWcagCriteria?: string[];
 }
 

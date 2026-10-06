@@ -209,6 +209,30 @@ describe('renderHtmlReport', () => {
     expect(html).toContain('Lighthouse only');
   });
 
+  it('describes results without pass/fail or conformance language', () => {
+    const html = renderHtmlReport(makeReport());
+    expect(html).toContain('<span class="status status-pass">No issues found</span>');
+    expect(html).toContain('<span class="status status-fail">Issues found</span>');
+    expect(html).toContain('It is not a compliance certification.');
+
+    const empty = makeStructured();
+    empty.issues = [];
+    const emptyHtml = renderHtmlReport(makeReport({ structured: empty }));
+    expect(emptyHtml).toContain('This scan found no issues');
+    expect(emptyHtml).not.toMatch(/conformance/i);
+  });
+
+  it('labels Lighthouse-only coverage and best-practice issues accurately', () => {
+    const structured = makeStructured();
+    structured.metadata = { pageTitle: 'Pricing - Example', engineMode: 'lighthouse-only' };
+    structured.issues = [{ ...structured.issues[0]!, wcagCriteria: 'Best practice', title: 'No main landmark' }];
+    const html = renderHtmlReport(makeReport({ structured, usage: null }));
+
+    expect(html).toContain('WCAG criteria with issues found');
+    expect(html).toContain('lists what automated checks found');
+    expect(html).toMatch(/<span class="wcag-chip">Best practice<\/span>/);
+  });
+
   it('matches the snapshot for a fixed fixture', () => {
     const html = renderHtmlReport(makeReport());
     // Version is read from package.json at runtime; normalize it so version
