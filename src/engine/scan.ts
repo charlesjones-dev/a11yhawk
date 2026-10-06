@@ -610,6 +610,9 @@ export class A11yHawkEngine {
             url: pageData.finalUrl || url,
             playwrightService: this.playwright,
             customHeaders: options.headers,
+            // Headers stay scoped to the origin the caller asked to scan, even
+            // when the page redirected elsewhere.
+            headerScopeUrl: url,
             jobLogger: log,
           });
           annotatedBuffer = annotationResult.annotatedBuffer;

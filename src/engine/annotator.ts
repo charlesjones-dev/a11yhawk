@@ -45,6 +45,8 @@ interface AnnotateScreenshotParams {
   url: string;
   playwrightService: PlaywrightService;
   customHeaders?: ScanHeader[];
+  /** URL whose origin may receive customHeaders (the original scan URL). Defaults to `url`. */
+  headerScopeUrl?: string;
   jobLogger?: Logger;
 }
 
@@ -275,7 +277,7 @@ function escapeXml(s: string): string {
  * as the screenshot), then composites colored overlays onto the screenshot.
  */
 export async function annotateScreenshot(params: AnnotateScreenshotParams): Promise<AnnotationResult> {
-  const { screenshotBuffer, issues, url, playwrightService, customHeaders, jobLogger: log } = params;
+  const { screenshotBuffer, issues, url, playwrightService, customHeaders, headerScopeUrl, jobLogger: log } = params;
   const startTime = Date.now();
 
   // Get screenshot dimensions
@@ -315,6 +317,7 @@ export async function annotateScreenshot(params: AnnotateScreenshotParams): Prom
         allSelectors,
         customHeaders,
         log,
+        headerScopeUrl ?? url,
       );
 
       // Match resolved bboxes back to issues

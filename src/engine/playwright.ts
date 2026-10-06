@@ -5,6 +5,7 @@ import type { ScanHeader } from '../types.js';
 import type { Logger } from '../logger/index.js';
 import { createLogger } from '../logger/index.js';
 import { installRequestGuard } from './request-guard.js';
+import { installScopedHeaders } from './scoped-headers.js';
 
 /**
  * Allocate a free TCP port by opening an ephemeral listener and reading back
@@ -477,7 +478,8 @@ export class PlaywrightService {
       }, 90000); // 90 seconds max for entire operation
     });
 
-    // Build extra HTTP headers (default + custom headers)
+    // Default browser headers only. Custom scan headers are scoped to the target
+    // origin by installScopedHeaders below, never set context-wide.
     const extraHTTPHeaders: Record<string, string> = {
       'Accept-Language': 'en-US,en;q=0.9',
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -492,27 +494,10 @@ export class PlaywrightService {
       'Upgrade-Insecure-Requests': '1',
     };
 
-    // Apply custom headers
     if (customHeaders && customHeaders.length > 0) {
-      let headerCount = 0;
-      let cookieCount = 0;
-      let authCount = 0;
-
-      for (const header of customHeaders) {
-        if (header.type === 'header') {
-          // Add custom header
-          extraHTTPHeaders[header.key] = header.value;
-          headerCount++;
-        } else if (header.type === 'authorization') {
-          // Add Bearer token to Authorization header
-          extraHTTPHeaders['Authorization'] = `Bearer ${header.value}`;
-          authCount++;
-        }
-        // Cookies will be handled separately via context.addCookies()
-        else if (header.type === 'cookie') {
-          cookieCount++;
-        }
-      }
+      const headerCount = customHeaders.filter((h) => h.type === 'header').length;
+      const authCount = customHeaders.filter((h) => h.type === 'authorization').length;
+      const cookieCount = customHeaders.filter((h) => h.type === 'cookie').length;
 
       // Security: log counts only, not values
       log.info('Custom headers prepared', { headerCount, authCount, cookieCount });
@@ -531,22 +516,6 @@ export class PlaywrightService {
       serviceWorkers: 'block',
     });
 
-    // Apply cookies if present
-    if (customHeaders && customHeaders.length > 0) {
-      const cookies = customHeaders
-        .filter((h) => h.type === 'cookie')
-        .map((h) => ({
-          name: h.key,
-          value: h.value,
-          url, // Cookie is scoped to the target URL
-        }));
-
-      if (cookies.length > 0) {
-        await context.addCookies(cookies);
-        log.debug('Applied cookies to context', { cookieCount: cookies.length });
-      }
-    }
-
     const page = await context.newPage();
 
     // Remove webdriver property to avoid detection
@@ -561,6 +530,8 @@ export class PlaywrightService {
     const requestGuard = await installRequestGuard(context, page, log, {
       allowPrivateNetworks: this.allowPrivateNetworks,
     });
+    // After the guard, so the guard still makes the final call on every request.
+    await installScopedHeaders(context, url, customHeaders);
 
     try {
       // Race between analysis and timeout
@@ -800,12 +771,17 @@ export class PlaywrightService {
    * Re-open a page to resolve CSS selectors to pixel bounding boxes.
    * Lightweight operation: no screenshot, no a11y tree, no CDP session.
    * Uses the existing browser server to avoid launch overhead.
+   *
+   * `headerScopeUrl` is the URL whose origin may receive the custom headers. Pass
+   * the original scan URL when `url` is the post-redirect final URL, so a
+   * redirect to another origin cannot widen the header scope.
    */
   async resolveElementBoundingBoxes(
     url: string,
     selectors: string[],
     customHeaders?: ScanHeader[],
     jobLogger?: Logger,
+    headerScopeUrl: string = url,
   ): Promise<Map<string, { x: number; y: number; width: number; height: number }>> {
     const log = jobLogger || defaultLogger;
     const results = new Map<string, { x: number; y: number; width: number; height: number }>();
@@ -817,7 +793,8 @@ export class PlaywrightService {
     const startTime = Date.now();
     log.info('Resolving element bounding boxes', { selectorCount: selectors.length });
 
-    // Build extra HTTP headers (reuse same headers as original capture)
+    // Default browser headers only (same as the original capture). Custom scan
+    // headers are scoped to the target origin by installScopedHeaders below.
     const extraHTTPHeaders: Record<string, string> = {
       'Accept-Language': 'en-US,en;q=0.9',
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -832,16 +809,6 @@ export class PlaywrightService {
       'Upgrade-Insecure-Requests': '1',
     };
 
-    if (customHeaders) {
-      for (const header of customHeaders) {
-        if (header.type === 'header') {
-          extraHTTPHeaders[header.key] = header.value;
-        } else if (header.type === 'authorization') {
-          extraHTTPHeaders['Authorization'] = `Bearer ${header.value}`;
-        }
-      }
-    }
-
     const context = await this.browser.newContext({
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -853,16 +820,6 @@ export class PlaywrightService {
       serviceWorkers: 'block',
     });
 
-    // Apply cookies if present
-    if (customHeaders) {
-      const cookies = customHeaders
-        .filter((h) => h.type === 'cookie')
-        .map((h) => ({ name: h.key, value: h.value, url }));
-      if (cookies.length > 0) {
-        await context.addCookies(cookies);
-      }
-    }
-
     const page = await context.newPage();
 
     // SSRF guard (security audit H-1): this method re-navigates a user-controlled URL,
@@ -870,6 +827,8 @@ export class PlaywrightService {
     // the page; the resulting error is swallowed by the catch below (annotation is
     // non-blocking) and the scan continues without bounding boxes.
     await installRequestGuard(context, page, log, { allowPrivateNetworks: this.allowPrivateNetworks });
+    // After the guard, so the guard still makes the final call on every request.
+    await installScopedHeaders(context, headerScopeUrl, customHeaders);
 
     try {
       // Navigate with a shorter timeout since we just need the DOM
