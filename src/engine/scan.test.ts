@@ -33,7 +33,8 @@ describe('buildStructuredFromLighthouse', () => {
       makeIssue('landmark-one-main', 'unknown', 'minor'),
     ]),
     'https://example.com/',
-    'WCAG 2.2 - AA',
+    '2.2',
+    'AA',
     'Example Domain',
   );
 
@@ -57,6 +58,31 @@ describe('buildStructuredFromLighthouse', () => {
       fixPriority: 'Low Priority',
     });
     expect(structured.wcagCoverage.map((c) => c.criteriaId)).not.toContain('unknown');
+  });
+
+  it('keeps criteria outside the requested standard out of coverage and reports them as low', () => {
+    const lighthouse = makeLighthouse([
+      makeIssue('color-contrast', '1.4.3', 'serious'),
+      makeIssue('target-size', '2.5.8', 'serious'),
+      makeIssue('identical-links-same-purpose', '2.4.9', 'serious'),
+    ]);
+
+    const wcag21 = buildStructuredFromLighthouse(lighthouse, 'https://example.com/', '2.1', 'AA', 'Example Domain');
+    expect(wcag21.standard).toBe('WCAG 2.1 - AA');
+    expect(wcag21.wcagCoverage.map((c) => c.criteriaId)).toEqual(['1.4.3']);
+    expect(wcag21.issues[1]).toMatchObject({
+      wcagCriteria: 'Outside WCAG 2.1 Level AA: 2.5.8 Target Size (Minimum)',
+      severity: 'low',
+      fixPriority: 'Low Priority',
+    });
+    expect(wcag21.issues[2]).toMatchObject({
+      wcagCriteria: 'Outside WCAG 2.1 Level AA: 2.4.9 Link Purpose (Link Only)',
+      severity: 'low',
+    });
+
+    const wcag22 = buildStructuredFromLighthouse(lighthouse, 'https://example.com/', '2.2', 'AA', 'Example Domain');
+    expect(wcag22.wcagCoverage.map((c) => c.criteriaId)).toEqual(['1.4.3', '2.5.8']);
+    expect(wcag22.issues[1]).toMatchObject({ wcagCriteria: '2.5.8', severity: 'high' });
   });
 
   it('exposes cross-reference criteria without "unknown"', () => {
