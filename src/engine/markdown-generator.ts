@@ -1,5 +1,8 @@
 import type { StructuredScanOutput, AccessibilityIssue } from '../types.js';
 import type { LighthouseTransformedResult, LighthouseIssue } from './lighthouse.js';
+import { isBestPracticeAudit, lighthouseCrossReferenceCriteria } from './lighthouse.js';
+
+const SEVERITY_RANK: Record<AccessibilityIssue['severity'], number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
 /**
  * Options for markdown generation
@@ -29,21 +32,25 @@ export function generateMarkdownFromStructured(data: StructuredScanOutput, optio
   sections.push(`## Accessibility Report: ${siteName}\n`);
   sections.push(`*Scanned ${data.url} on ${formattedDate} • WCAG ${version} Level ${level}*\n`);
 
+  // Lighthouse-only scans have no AI review, and their WCAG coverage lists only
+  // the criteria Lighthouse found issues under (it cannot vouch for the rest).
+  const lighthouseOnly = data.metadata?.engineMode === 'lighthouse-only';
+  const checksLabel = lighthouseOnly ? 'automated checks' : 'automated and AI checks';
+
   // Introduction paragraph
-  sections.push(generateIntroduction(data));
+  sections.push(generateIntroduction(data, checksLabel));
   sections.push('---\n');
 
-  // Build a set of WCAG criteria that Lighthouse detected for cross-referencing
-  const lighthouseWcagCriteria = new Set<string>();
-  if (options?.lighthouseResult) {
-    for (const lhIssue of options.lighthouseResult.issues) {
-      if (lhIssue.wcagCriteria && lhIssue.wcagCriteria !== 'unknown') {
-        lighthouseWcagCriteria.add(lhIssue.wcagCriteria);
-      }
-    }
-  }
+  // WCAG criteria Lighthouse found issues under (plus the related criteria of
+  // best-practice audits), for cross-referencing with AI findings. Lighthouse-only
+  // findings all come from Lighthouse, so there is nothing to cross-reference.
+  const lighthouseWcagCriteria = new Set(
+    options?.lighthouseResult && !lighthouseOnly
+      ? lighthouseCrossReferenceCriteria(options.lighthouseResult.issues)
+      : [],
+  );
 
-  // Calculate how many AI issues overlap with Lighthouse vs are AI-only discoveries
+  // Calculate how many AI issues share a criterion with a Lighthouse finding
   const aiIssueStats = calculateAiIssueStats(data.issues, lighthouseWcagCriteria);
 
   // Lighthouse Automated Audit section (if available)
@@ -56,48 +63,44 @@ export function generateMarkdownFromStructured(data: StructuredScanOutput, optio
     sections.push('---\n');
   }
 
-  // AI Analysis section
+  // Results section
   const stats = data.statistics;
-  const passedCriteria = data.wcagCoverage.filter((c) => c.passed).length;
+  const criteriaWithoutIssues = data.wcagCoverage.filter((c) => c.passed).length;
   const totalCriteria = data.wcagCoverage.length;
-  const compliancePercent = totalCriteria > 0 ? Math.round((passedCriteria / totalCriteria) * 100) : 0;
+  const criteriaWithoutIssuesPercent =
+    totalCriteria > 0 ? Math.round((criteriaWithoutIssues / totalCriteria) * 100) : 0;
+  const hasLighthouseIssues = Boolean(options?.lighthouseResult && options.lighthouseResult.issues.length > 0);
 
-  sections.push('## AI Analysis\n');
+  sections.push(lighthouseOnly ? '## Results\n' : '## AI Analysis\n');
 
-  if (options?.lighthouseResult && options.lighthouseResult.issues.length > 0) {
-    // Show comparison when Lighthouse data is available
+  if (!lighthouseOnly) {
     sections.push(
-      `*A11yHawk AI analyzed the page screenshot, accessibility tree, and HTML to provide comprehensive coverage beyond automated testing.*\n`,
+      hasLighthouseIssues
+        ? '*An AI model reviewed the page screenshot, accessibility tree, HTML and Lighthouse results.*\n'
+        : '*An AI model reviewed the page screenshot, accessibility tree and HTML.*\n',
     );
-    sections.push('| Metric | Value |');
-    sections.push('|--------|-------|');
-    sections.push(`| **Total Issues Found** | ${stats.totalIssues} |`);
-    sections.push(
-      `| 🔍 Lighthouse-confirmed | ${aiIssueStats.lighthouseConfirmed} issue${aiIssueStats.lighthouseConfirmed !== 1 ? 's' : ''} |`,
-    );
-    sections.push(`| ✨ AI-only discoveries | ${aiIssueStats.aiOnly} issue${aiIssueStats.aiOnly !== 1 ? 's' : ''} |`);
-    sections.push(
-      `| **Severity Breakdown** | ${stats.criticalIssues} critical • ${stats.highIssues} high • ${stats.mediumIssues} medium • ${stats.lowIssues} low |`,
-    );
-    sections.push(
-      `| **WCAG ${level} Compliance** | ${compliancePercent}% (${passedCriteria}/${totalCriteria} criteria) |`,
-    );
-    sections.push(`| **Overall Score** | **${data.overallScore}/100** |`);
-    sections.push('');
-  } else {
-    // Simpler view when no Lighthouse data
-    sections.push('| Metric | Value |');
-    sections.push('|--------|-------|');
-    sections.push(`| **Total Issues Found** | ${stats.totalIssues} |`);
-    sections.push(
-      `| **Severity Breakdown** | ${stats.criticalIssues} critical • ${stats.highIssues} high • ${stats.mediumIssues} medium • ${stats.lowIssues} low |`,
-    );
-    sections.push(
-      `| **WCAG ${level} Compliance** | ${compliancePercent}% (${passedCriteria}/${totalCriteria} criteria) |`,
-    );
-    sections.push(`| **Overall Score** | **${data.overallScore}/100** |`);
-    sections.push('');
   }
+  sections.push('| Metric | Value |');
+  sections.push('|--------|-------|');
+  sections.push(`| **Total Issues Found** | ${stats.totalIssues} |`);
+  if (!lighthouseOnly && hasLighthouseIssues) {
+    sections.push(
+      `| Same criterion flagged by Lighthouse | ${aiIssueStats.lighthouseConfirmed} issue${aiIssueStats.lighthouseConfirmed !== 1 ? 's' : ''} |`,
+    );
+    sections.push(
+      `| Not flagged by Lighthouse | ${aiIssueStats.aiOnly} issue${aiIssueStats.aiOnly !== 1 ? 's' : ''} |`,
+    );
+  }
+  sections.push(
+    `| **Severity Breakdown** | ${stats.criticalIssues} critical • ${stats.highIssues} high • ${stats.mediumIssues} medium • ${stats.lowIssues} low |`,
+  );
+  if (!lighthouseOnly) {
+    sections.push(
+      `| **Criteria with no issues found** | ${criteriaWithoutIssues} of ${totalCriteria} (${criteriaWithoutIssuesPercent}%) |`,
+    );
+  }
+  sections.push(`| **Overall Score** | **${data.overallScore}/100** |`);
+  sections.push('');
 
   sections.push('---\n');
 
@@ -144,12 +147,22 @@ export function generateMarkdownFromStructured(data: StructuredScanOutput, optio
 
   sections.push('---\n');
 
-  // WCAG Compliance Matrix
-  sections.push('## WCAG Compliance Matrix\n');
-  sections.push(generateComplianceTable(data.wcagCoverage));
-  sections.push(
-    `**Overall WCAG Level ${level} Compliance**: ${compliancePercent}% (${passedCriteria}/${totalCriteria} criteria fully compliant)\n`,
-  );
+  // WCAG criteria table
+  if (lighthouseOnly) {
+    sections.push('## WCAG criteria with issues found\n');
+    if (data.wcagCoverage.length > 0) {
+      sections.push(generateCriteriaTable(data.wcagCoverage, data.issues));
+      sections.push(
+        'Lighthouse reports only failing audits, so this table lists only the criteria where it found issues.\n',
+      );
+    } else {
+      sections.push('Lighthouse found no issues under a WCAG criterion.\n');
+    }
+  } else {
+    sections.push('## WCAG criteria checked\n');
+    sections.push(generateCriteriaTable(data.wcagCoverage, data.issues));
+    sections.push(`${criteriaWithoutIssues} of ${totalCriteria} checked criteria had no issues found.\n`);
+  }
   sections.push('---\n');
 
   // Technical Recommendations
@@ -159,15 +172,13 @@ export function generateMarkdownFromStructured(data: StructuredScanOutput, optio
 
   // Remediation Roadmap
   sections.push('## Accessibility Remediation Roadmap\n');
-  sections.push(generateRemediationRoadmap(data.issues, level));
+  sections.push(generateRemediationRoadmap(data.issues));
   sections.push('---\n');
 
   // Summary
   sections.push('## Summary\n');
   sections.push(generateSummary(data));
-  sections.push(
-    `By addressing the critical and high-priority issues first, this page can achieve functional accessibility for the majority of users with disabilities. Focus on the Phase 1 and Phase 2 items in the remediation roadmap above.`,
-  );
+  sections.push(generateClosing(data, checksLabel));
 
   return sections.join('\n');
 }
@@ -232,26 +243,27 @@ function formatScanDate(isoDate: string): string {
 /**
  * Generate an introduction paragraph based on scan statistics
  */
-function generateIntroduction(data: StructuredScanOutput): string {
+function generateIntroduction(data: StructuredScanOutput, checksLabel: string): string {
   const stats = data.statistics;
   const total = stats.totalIssues;
   const critical = stats.criticalIssues;
   const high = stats.highIssues;
 
   if (total === 0) {
-    return 'This page demonstrates excellent accessibility with no significant issues detected. The page follows WCAG best practices and provides a good foundation for users with disabilities.\n';
+    return `This scan found no issues. ${capitalizeFirst(checksLabel)} cover only part of WCAG, so also test with a keyboard and a screen reader.\n`;
   }
 
   if (critical > 0) {
-    const userGroups = ['screen reader users', 'keyboard users', 'users with visual impairments'];
-    return `This page has **${critical} critical barrier${critical !== 1 ? 's' : ''}** that prevent access for users with disabilities. These issues significantly impact ${userGroups.slice(0, 2).join(' and ')}, making core functionality inaccessible. Immediate remediation is recommended to achieve baseline accessibility.\n`;
+    return `This scan found **${critical} critical issue${critical !== 1 ? 's' : ''}** that can prevent some people with disabilities from using parts of the page.\n`;
   }
 
   if (high > 0) {
-    return `Overall, this page demonstrates some accessibility foundations but has ${high} high-priority issue${high !== 1 ? 's' : ''} that significantly impair usability. With targeted fixes to address these concerns, the page could achieve solid WCAG compliance.\n`;
+    return `This scan found no critical issues and **${high} high-severity issue${high !== 1 ? 's' : ''}** that can make parts of the page hard to use for people with disabilities.\n`;
   }
 
-  return `This page has a solid accessibility foundation with only minor issues detected. The main concerns are medium and low priority items that, when addressed, will enhance the experience for all users.\n`;
+  return total === 1
+    ? 'This scan found 1 issue, which is not critical or high severity.\n'
+    : `This scan found ${total} issues, none of them critical or high severity.\n`;
 }
 
 /**
@@ -260,23 +272,25 @@ function generateIntroduction(data: StructuredScanOutput): string {
 function formatIssue(issue: AccessibilityIssue, lighthouseWcagCriteria?: Set<string>): string {
   const lines: string[] = [];
 
-  // Check if this issue was also detected by Lighthouse
+  // Check if Lighthouse found an issue under the same criterion
   // Extract criterion number from wcagCriteria (e.g., "1.4.3" from "1.4.3 Contrast (Minimum)")
   const criterionMatch = issue.wcagCriteria.match(/^(\d+\.\d+\.\d+)/);
   const criterionNumber = criterionMatch ? criterionMatch[1] : null;
   const isLighthouseDetected = criterionNumber && lighthouseWcagCriteria?.has(criterionNumber);
 
-  // Add Lighthouse badge to title if detected
-  const lighthouseBadge = isLighthouseDetected ? ' 🔍' : '';
-  lines.push(`#### ${issue.id}: ${issue.title}${lighthouseBadge}\n`);
+  lines.push(`#### ${issue.id}: ${issue.title}\n`);
 
-  // Add Lighthouse detection note
   if (isLighthouseDetected) {
-    lines.push(`> 🔍 *Also detected by Lighthouse automated audit*\n`);
+    lines.push(`> *Lighthouse also reported an issue related to ${criterionNumber}.*\n`);
   }
 
   lines.push(`- **Location**: ${issue.location}`);
-  lines.push(`- **WCAG Criterion**: ${issue.wcagCriteria} (Level ${issue.wcagLevel})`);
+  // The level belongs to a criterion; best-practice items without one show no level
+  lines.push(
+    criterionNumber
+      ? `- **WCAG Criterion**: ${issue.wcagCriteria} (Level ${issue.wcagLevel})`
+      : `- **WCAG Criterion**: ${issue.wcagCriteria}`,
+  );
   lines.push(`- **Severity**: ${capitalizeFirst(issue.severity)}`);
   lines.push(`- **Pattern Detected**: ${issue.patternDetected}`);
 
@@ -307,43 +321,38 @@ function formatIssue(issue: AccessibilityIssue, lighthouseWcagCriteria?: Set<str
 }
 
 /**
- * Generate WCAG compliance table
+ * Generate the WCAG criteria table: what was checked and what was found per criterion
  */
-function generateComplianceTable(wcagCoverage: StructuredScanOutput['wcagCoverage']): string {
+function generateCriteriaTable(
+  wcagCoverage: StructuredScanOutput['wcagCoverage'],
+  issues: AccessibilityIssue[],
+): string {
   const lines: string[] = [];
+  const issuesById = new Map(issues.map((issue) => [issue.id, issue]));
 
-  lines.push('| Criterion | Title | Status | Issues | Priority |');
-  lines.push('|-----------|-------|--------|--------|----------|');
+  lines.push('| Criterion | Title | Result | Issues | Highest severity |');
+  lines.push('|-----------|-------|--------|--------|------------------|');
 
   wcagCoverage.forEach((criterion) => {
-    const status = criterion.passed ? '✅ Pass' : '❌ Fail';
-    const issues = criterion.passed
-      ? 'No issues found'
-      : criterion.issues && criterion.issues.length > 0
-        ? criterion.issues.join(', ')
-        : 'Issues detected';
+    const result = criterion.passed ? 'No issues found' : 'Issues found';
+    const issueIds = criterion.passed ? [] : (criterion.issues ?? []);
+    const issuesCell = issueIds.length > 0 ? issueIds.join(', ') : '-';
 
-    // Determine priority based on whether there are issues
-    const priority = criterion.passed ? '-' : determinePriorityFromIssues(criterion.issues || []);
+    // Highest severity among the issues mapped to this criterion
+    const linked = issueIds
+      .map((id) => issuesById.get(id))
+      .filter((issue): issue is AccessibilityIssue => issue !== undefined);
+    const highest = linked.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])[0];
+    const severity = highest ? capitalizeFirst(highest.severity) : '-';
 
     // Create link to W3C documentation
     const criteriaLink = `[**${criterion.criteriaId}**](https://www.w3.org/WAI/WCAG22/Understanding/${getCriteriaSlug(criterion.name)}.html)`;
 
-    lines.push(`| ${criteriaLink} | ${criterion.name} | ${status} | ${issues} | ${priority} |`);
+    lines.push(`| ${criteriaLink} | ${criterion.name} | ${result} | ${issuesCell} | ${severity} |`);
   });
 
   lines.push('');
   return lines.join('\n');
-}
-
-/**
- * Determine priority level from issue IDs
- */
-function determinePriorityFromIssues(issueIds: string[]): string {
-  if (issueIds.length === 0) return '-';
-  // For simplicity, we'll return a generic priority
-  // In a real implementation, you'd look up the actual issues
-  return 'High';
 }
 
 /**
@@ -397,7 +406,7 @@ function generateRecommendations(issues: AccessibilityIssue[]): string {
 /**
  * Generate remediation roadmap section
  */
-function generateRemediationRoadmap(issues: AccessibilityIssue[], level: string): string {
+function generateRemediationRoadmap(issues: AccessibilityIssue[]): string {
   const lines: string[] = [];
 
   // Group by priority
@@ -411,10 +420,7 @@ function generateRemediationRoadmap(issues: AccessibilityIssue[], level: string)
     immediate.forEach((issue) => {
       lines.push(`- [ ] ${issue.title} (${issue.id})`);
     });
-    const criticalPercent = Math.round((immediate.length / issues.length) * 100);
-    lines.push(
-      `\n**Expected Impact**: Address ${criticalPercent}% of accessibility barriers, achieve baseline WCAG Level A compliance\n`,
-    );
+    lines.push('');
   }
 
   // Phase 2: High Priority
@@ -423,10 +429,7 @@ function generateRemediationRoadmap(issues: AccessibilityIssue[], level: string)
     highPriority.forEach((issue) => {
       lines.push(`- [ ] ${issue.title} (${issue.id})`);
     });
-    const highPercent = Math.round(((immediate.length + highPriority.length) / issues.length) * 100);
-    lines.push(
-      `\n**Expected Impact**: Achieve ${highPercent}% WCAG Level ${level} compliance, improve usability for screen reader users\n`,
-    );
+    lines.push('');
   }
 
   // Phase 3: Medium Priority
@@ -435,7 +438,7 @@ function generateRemediationRoadmap(issues: AccessibilityIssue[], level: string)
     mediumPriority.forEach((issue) => {
       lines.push(`- [ ] ${issue.title} (${issue.id})`);
     });
-    lines.push(`\n**Expected Impact**: Achieve 95%+ WCAG Level ${level} compliance, enhance mobile accessibility\n`);
+    lines.push('');
   }
 
   return lines.join('\n');
@@ -448,18 +451,15 @@ function generateSummary(data: StructuredScanOutput): string {
   const lines: string[] = [];
 
   // What's Working Well (from passed checks)
-  lines.push("**What's Working Well**:");
   if (data.passedChecks.length > 0) {
+    lines.push("**What's Working Well**:");
     data.passedChecks.slice(0, 3).forEach((check) => {
       lines.push(`- ${check.description}`);
     });
-  } else {
-    lines.push('- Basic page structure is present');
+    lines.push('');
   }
-  lines.push('');
 
   // Priority Fixes (top 3 issues by priority)
-  lines.push('**Priority Fixes**:');
   const priorityIssues = [
     ...data.issues.filter((i) => i.fixPriority === 'Immediate'),
     ...data.issues.filter((i) => i.fixPriority === 'High Priority'),
@@ -467,15 +467,27 @@ function generateSummary(data: StructuredScanOutput): string {
   ].slice(0, 3);
 
   if (priorityIssues.length > 0) {
+    lines.push('**Priority Fixes**:');
     priorityIssues.forEach((issue) => {
       lines.push(`- ${issue.title} (${issue.id})`);
     });
-  } else {
-    lines.push('- Continue monitoring for accessibility best practices');
+    lines.push('');
   }
-  lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * Closing paragraph: the next step, and what this report does and does not establish
+ */
+function generateClosing(data: StructuredScanOutput, checksLabel: string): string {
+  const scope = `This report covers one page and lists what ${checksLabel} found. It is not a compliance certification.`;
+  if (data.issues.length === 0) return scope;
+  const nextStep =
+    data.issues.length === 1
+      ? 'Fix the issue above, then scan again to confirm the fix.'
+      : 'Fix the issues above, starting with the most severe, then scan again to confirm the fixes.';
+  return `${nextStep} ${scope} ${capitalizeFirst(checksLabel)} cover only part of WCAG, so also test with a keyboard and a screen reader.`;
 }
 
 /**
@@ -486,7 +498,7 @@ function capitalizeFirst(str: string): string {
 }
 
 /**
- * Calculate AI issue statistics (Lighthouse-confirmed vs AI-only)
+ * Count AI issues whose criterion Lighthouse also found an issue under, and the rest
  */
 function calculateAiIssueStats(
   issues: AccessibilityIssue[],
@@ -520,7 +532,6 @@ function generateLighthouseTable(issues: LighthouseIssue[]): string {
   lines.push('|-------|------|----------|----------|-------------|');
 
   issues.forEach((issue) => {
-    const severityEmoji = getSeverityEmoji(issue.severity);
     const elementCount = issue.elements.length;
     const elementsDisplay = elementCount > 0 ? `${elementCount} element${elementCount !== 1 ? 's' : ''}` : '-';
 
@@ -531,33 +542,17 @@ function generateLighthouseTable(issues: LighthouseIssue[]): string {
     const wcagLink =
       issue.wcagCriteria !== 'unknown'
         ? `[${issue.wcagCriteria}](https://www.w3.org/WAI/WCAG22/Understanding/${getWcagSlug(issue.wcagCriteria)})`
-        : issue.wcagCriteria;
+        : isBestPracticeAudit(issue.auditId)
+          ? 'Best practice'
+          : 'Not mapped';
 
     lines.push(
-      `| ${issue.auditId} | ${wcagLink} | ${severityEmoji} ${capitalizeFirst(issue.severity)} | ${elementsDisplay} | ${shortDesc} |`,
+      `| ${issue.auditId} | ${wcagLink} | ${capitalizeFirst(issue.severity)} | ${elementsDisplay} | ${shortDesc} |`,
     );
   });
 
   lines.push('');
   return lines.join('\n');
-}
-
-/**
- * Get emoji for severity level
- */
-function getSeverityEmoji(severity: string): string {
-  switch (severity) {
-    case 'critical':
-      return '🔴';
-    case 'serious':
-      return '🟠';
-    case 'moderate':
-      return '🟡';
-    case 'minor':
-      return '🟢';
-    default:
-      return '⚪';
-  }
 }
 
 /**

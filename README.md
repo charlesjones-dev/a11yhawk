@@ -126,7 +126,7 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 | `llm.debug`             | `boolean`                          | `false`                        | Verbose prompt/response logging                                                              |
 | `wcagVersion`           | `'2.0' \| '2.1' \| '2.2'`          | `'2.1'`                        |                                                                                              |
 | `wcagLevel`             | `'A' \| 'AA' \| 'AAA'`             | `'AA'`                         |                                                                                              |
-| `headers`               | `ScanHeader[]`                     | none                           | Custom request headers (cookies, auth) sent to the page                                      |
+| `headers`               | `ScanHeader[]`                     | none                           | Custom request headers (cookies, auth), sent only to the scan URL's origin; see Security     |
 | `lighthouse`            | `boolean \| ScanLighthouseOptions` | `true`                         | `false` skips the audit (LLM mode only); an object selects categories, see below             |
 | `lighthouse.categories` | `LighthouseCategory[]`             | `['accessibility']`            | `'accessibility' \| 'performance'`; must include `'accessibility'`; one run, one page load   |
 | `lighthouse.includeRaw` | `boolean`                          | `false`                        | Attach the trimmed raw Lighthouse result as `report.lighthouse.raw`                          |
@@ -429,6 +429,7 @@ A11yHawk is designed to be safe to embed in services where scan URLs come from u
 - **SSRF request guard, default-on.** Every request the scanned page makes is validated at the browser context level: scheme checks, per-request DNS resolution with no cached allow-verdicts, redirect-hop detection, service workers blocked, private/loopback/link-local targets refused. Scan URLs are re-validated at scan time (not just submission time) to narrow DNS-rebinding windows.
 - **`allowPrivateNetworks: true`** exists because scanning your own internal apps is a primary self-hosting use case. It only widens which resolved addresses the guard accepts; every other protection stays active. Leave it `false` anywhere scan URLs come from people you don't trust.
 - **Known residual risk**: Lighthouse drives its own browser navigation, outside the Playwright request guard. The engine re-validates the audit target immediately before the run, but network-layer egress filtering is the only complete mitigation. If you run A11yHawk multi-tenant, put egress rules around it.
+- **Custom headers stay with the target.** Header and bearer-token entries in `headers` are added only to requests whose origin (scheme, host, and port) matches the scan URL, so third-party scripts, CDNs, and analytics on the page never receive them. Subdomains and the `www`/bare variant are different origins, so pass the URL the page finally lands on. Cookie entries (and a `Cookie` header entry) are set as cookies for the scan URL. Residual gap: Playwright re-sends a request's headers on its redirect hops, so a same-origin URL that redirects to another origin still delivers them to the redirect target.
 - **Subprocess hygiene**: the Lighthouse CLI is spawned with `shell: false` and argv arrays; the attacker-controllable URL is never interpreted by a shell.
 - **Key handling**: API keys arrive as options, are never logged, and error messages from the LLM layer are sanitized so keys cannot leak through error chains.
 - **Report output**: everything interpolated into the HTML report is entity-escaped, so a malicious scanned page cannot inject markup or script into its own report.
@@ -494,9 +495,11 @@ The directory also holds two deployment templates: `docker-compose.yml` (server 
 
 ## Output formats
 
-- **`structured`** (JSON): overall score (0-100, recomputed from WCAG coverage), per-severity statistics, WCAG coverage with pass/fail per criterion, issues with location/selector, code context, impact, and remediation, passed checks. Stable shape; treat as the source of truth.
+- **`structured`** (JSON): overall score (0-100: the percent of checked WCAG criteria with no issues found, recomputed by the engine; the Lighthouse accessibility score in Lighthouse-only mode), per-severity statistics, WCAG coverage marking each checked criterion as issues found or no issues found (`passed`), issues with location/selector, code context, impact, and remediation, passed checks. Stable shape; treat as the source of truth.
 - **`markdown`**: the same content as a readable report.
 - **HTML** (via `renderHtmlReport`): a single dark-theme file with score ring, severity breakdown, sortable/collapsible issues with client-side resolve tracking (localStorage), and the annotated screenshot. Attach it to CI artifacts, tickets, or email; it has zero external dependencies.
+
+Reports describe what was checked and what was found on one page. Automated and AI checks find WCAG failures but cover only part of WCAG, so a scan cannot establish conformance, and the reports say so: they are not a compliance certification.
 
 ## Roadmap
 

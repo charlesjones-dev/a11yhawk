@@ -729,7 +729,7 @@ export function trimLhrForOutput(lhr: Record<string, unknown>): Record<string, u
 export interface CompactLighthouseIssue {
   /** Lighthouse audit ID (e.g., "image-alt") */
   audit: string;
-  /** WCAG success criterion (e.g., "1.1.1") */
+  /** WCAG success criterion (e.g., "1.1.1"), "best-practice", or "unknown" */
   wcag: string;
   /** Severity level */
   severity: 'critical' | 'serious' | 'moderate' | 'minor';
@@ -755,7 +755,7 @@ export interface CompactLighthouseIssue {
 export function transformToCompactFormat(issues: LighthouseIssue[]): CompactLighthouseIssue[] {
   return issues.map((issue) => ({
     audit: issue.auditId,
-    wcag: issue.wcagCriteria,
+    wcag: isBestPracticeAudit(issue.auditId) ? 'best-practice' : issue.wcagCriteria,
     severity: issue.severity,
     count: issue.elements.length,
     selectors: issue.elements
@@ -817,7 +817,7 @@ export interface LighthouseIssue {
   title: string;
   /** Brief description of the issue */
   description: string;
-  /** WCAG success criterion (e.g., "1.1.1") */
+  /** WCAG success criterion (e.g., "1.1.1"), or "unknown" for audits with none (including best-practice audits) */
   wcagCriteria: string;
   /** Issue severity level */
   severity: 'critical' | 'serious' | 'moderate' | 'minor';
@@ -879,20 +879,23 @@ export interface LighthouseTransformedResult {
 }
 
 /**
- * Mapping of Lighthouse audit IDs to WCAG 2.1 success criteria
- *
- * Based on Lighthouse accessibility audit documentation:
- * https://developer.chrome.com/docs/lighthouse/accessibility/
+ * Lighthouse accessibility audit ID -> WCAG success criterion, taken from the
+ * WCAG tags on the axe-core rule behind each audit (Lighthouse 13, axe-core
+ * 4.12). Where axe tags several criteria, the first relevant one is kept.
+ * Audits axe tags best-practice have no criterion and are listed in
+ * BEST_PRACTICE_RELATED_CRITERIA instead. Unlisted audits map to 'unknown'.
  */
 const AUDIT_TO_WCAG: Record<string, string> = {
   // WCAG 1.1.1 - Non-text Content
   'image-alt': '1.1.1',
   'input-image-alt': '1.1.1',
   'object-alt': '1.1.1',
-  'frame-title': '1.1.1',
-  'area-alt': '1.1.1',
-  'role-img-alt': '1.1.1',
   'svg-img-alt': '1.1.1',
+  'aria-meter-name': '1.1.1',
+  'aria-progressbar-name': '1.1.1',
+
+  // WCAG 1.2.2 - Captions (Prerecorded)
+  'video-caption': '1.2.2',
 
   // WCAG 1.3.1 - Info and Relationships
   list: '1.3.1',
@@ -900,23 +903,17 @@ const AUDIT_TO_WCAG: Record<string, string> = {
   'definition-list': '1.3.1',
   dlitem: '1.3.1',
   'th-has-data-cells': '1.3.1',
+  'td-has-header': '1.3.1',
   'td-headers-attr': '1.3.1',
   'table-fake-caption': '1.3.1',
-  'heading-order': '1.3.1',
-  'empty-heading': '1.3.1',
-  'form-field-multiple-labels': '1.3.1',
-
-  // WCAG 1.3.2 - Meaningful Sequence
-  'logical-tab-order': '1.3.2',
-
-  // WCAG 1.3.4 - Orientation
-  'orientation-lock': '1.3.4',
+  'aria-required-children': '1.3.1',
+  'aria-required-parent': '1.3.1',
 
   // WCAG 1.3.5 - Identify Input Purpose
   'autocomplete-valid': '1.3.5',
 
   // WCAG 1.4.1 - Use of Color
-  'use-of-color': '1.4.1',
+  'link-in-text-block': '1.4.1',
 
   // WCAG 1.4.3 - Contrast (Minimum)
   'color-contrast': '1.4.3',
@@ -924,27 +921,8 @@ const AUDIT_TO_WCAG: Record<string, string> = {
   // WCAG 1.4.4 - Resize Text
   'meta-viewport': '1.4.4',
 
-  // WCAG 1.4.10 - Reflow
-  'content-width': '1.4.10',
-
-  // WCAG 1.4.11 - Non-text Contrast
-  'non-text-contrast': '1.4.11',
-
-  // WCAG 1.4.12 - Text Spacing
-  'text-spacing': '1.4.12',
-
-  // WCAG 2.1.1 - Keyboard
-  accesskeys: '2.1.1',
-  'keyboard-focusable': '2.1.1',
-
-  // WCAG 2.1.4 - Character Key Shortcuts
-  'no-character-key-shortcuts': '2.1.4',
-
   // WCAG 2.2.1 - Timing Adjustable
   'meta-refresh': '2.2.1',
-
-  // WCAG 2.2.2 - Pause, Stop, Hide
-  'video-caption': '2.2.2',
 
   // WCAG 2.4.1 - Bypass Blocks
   bypass: '2.4.1',
@@ -952,66 +930,93 @@ const AUDIT_TO_WCAG: Record<string, string> = {
   // WCAG 2.4.2 - Page Titled
   'document-title': '2.4.2',
 
-  // WCAG 2.4.3 - Focus Order
-  tabindex: '2.4.3',
-  'focus-order': '2.4.3',
-
   // WCAG 2.4.4 - Link Purpose (In Context)
   'link-name': '2.4.4',
-  'identical-links-same-purpose': '2.4.4',
 
-  // WCAG 2.4.6 - Headings and Labels
-  'label-content-name-mismatch': '2.4.6',
-
-  // WCAG 2.4.7 - Focus Visible
-  'focus-visible': '2.4.7',
+  // WCAG 2.4.9 - Link Purpose (Link Only)
+  'identical-links-same-purpose': '2.4.9',
 
   // WCAG 2.5.3 - Label in Name
-  'label-in-name': '2.5.3',
+  'label-content-name-mismatch': '2.5.3',
 
-  // WCAG 2.5.5 - Target Size
-  'target-size': '2.5.5',
+  // WCAG 2.5.8 - Target Size (Minimum)
+  'target-size': '2.5.8',
 
   // WCAG 3.1.1 - Language of Page
   'html-has-lang': '3.1.1',
   'html-lang-valid': '3.1.1',
+  'html-xml-lang-mismatch': '3.1.1',
 
   // WCAG 3.1.2 - Language of Parts
   'valid-lang': '3.1.2',
 
-  // WCAG 4.1.1 - Parsing
-  'duplicate-id-active': '4.1.1',
-  'duplicate-id-aria': '4.1.1',
-  'duplicate-id': '4.1.1',
+  // WCAG 3.3.2 - Labels or Instructions
+  'form-field-multiple-labels': '3.3.2',
 
   // WCAG 4.1.2 - Name, Role, Value
   'aria-allowed-attr': '4.1.2',
-  'aria-allowed-role': '4.1.2',
   'aria-command-name': '4.1.2',
-  'aria-dialog-name': '4.1.2',
+  'aria-conditional-attr': '4.1.2',
+  'aria-deprecated-role': '4.1.2',
   'aria-hidden-body': '4.1.2',
   'aria-hidden-focus': '4.1.2',
   'aria-input-field-name': '4.1.2',
-  'aria-meter-name': '4.1.2',
-  'aria-progressbar-name': '4.1.2',
+  'aria-prohibited-attr': '4.1.2',
   'aria-required-attr': '4.1.2',
-  'aria-required-children': '4.1.2',
-  'aria-required-parent': '4.1.2',
   'aria-roles': '4.1.2',
-  'aria-text': '4.1.2',
   'aria-toggle-field-name': '4.1.2',
   'aria-tooltip-name': '4.1.2',
-  'aria-treeitem-name': '4.1.2',
   'aria-valid-attr-value': '4.1.2',
   'aria-valid-attr': '4.1.2',
   'button-name': '4.1.2',
+  'duplicate-id-aria': '4.1.2',
+  'frame-title': '4.1.2',
+  'input-button-name': '4.1.2',
   label: '4.1.2',
   'select-name': '4.1.2',
-  'input-button-name': '4.1.2',
-
-  // WCAG 4.1.3 - Status Messages
-  'aria-live': '4.1.3',
 };
+
+/**
+ * Audits axe-core tags best-practice. They have no WCAG criterion of their own
+ * and are never reported as WCAG failures. Each lists the criteria the same
+ * problem is usually filed under (a missing <main> is typically reported
+ * against 1.3.1 or 2.4.1), used only to cross-reference AI findings with
+ * Lighthouse.
+ */
+const BEST_PRACTICE_RELATED_CRITERIA: Record<string, string[]> = {
+  accesskeys: [],
+  'aria-allowed-role': ['4.1.2'],
+  'aria-dialog-name': ['4.1.2'],
+  'aria-text': ['4.1.2'],
+  'aria-treeitem-name': ['4.1.2'],
+  'empty-heading': ['1.3.1', '2.4.6'],
+  'heading-order': ['1.3.1'],
+  'image-redundant-alt': ['1.1.1'],
+  'landmark-one-main': ['1.3.1', '2.4.1'],
+  'presentation-role-conflict': ['4.1.2'],
+  'skip-link': ['2.4.1'],
+  tabindex: ['2.4.3'],
+  'table-duplicate-name': ['1.3.1'],
+};
+
+/** True when axe-core tags the audit best-practice (no WCAG criterion of its own). */
+export function isBestPracticeAudit(auditId: string): boolean {
+  return Object.hasOwn(BEST_PRACTICE_RELATED_CRITERIA, auditId);
+}
+
+/**
+ * WCAG criteria to cross-reference AI findings against: every mapped criterion
+ * Lighthouse found issues under, plus the related criteria of best-practice
+ * audits. Never contains 'unknown'.
+ */
+export function lighthouseCrossReferenceCriteria(issues: LighthouseIssue[]): string[] {
+  const criteria = new Set<string>();
+  for (const issue of issues) {
+    if (issue.wcagCriteria !== 'unknown') criteria.add(issue.wcagCriteria);
+    for (const related of BEST_PRACTICE_RELATED_CRITERIA[issue.auditId] ?? []) criteria.add(related);
+  }
+  return [...criteria];
+}
 
 /**
  * Map Lighthouse score to severity level
@@ -1021,6 +1026,11 @@ const AUDIT_TO_WCAG: Record<string, string> = {
  * @returns Severity level
  */
 function mapSeverity(score: number | null, auditId?: string): 'critical' | 'serious' | 'moderate' | 'minor' {
+  // Best-practice audits are not WCAG failures
+  if (auditId && isBestPracticeAudit(auditId)) {
+    return 'minor';
+  }
+
   // Some audits are inherently more critical
   const criticalAudits = ['aria-hidden-body', 'html-has-lang', 'document-title', 'bypass'];
   const seriousAudits = ['color-contrast', 'image-alt', 'button-name', 'link-name', 'label'];

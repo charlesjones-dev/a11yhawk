@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLighthouseCliArgs,
   extractPerformanceFromLhr,
+  isBestPracticeAudit,
+  lighthouseCrossReferenceCriteria,
   LighthouseAuditError,
   LighthouseService,
   transformLighthouseToIssues,
+  transformToCompactFormat,
   trimLhrForOutput,
   type LighthouseA11yResult,
+  type LighthouseIssue,
   type LighthousePerformanceResult,
 } from './lighthouse.js';
 
@@ -66,6 +70,65 @@ describe('transformLighthouseToIssues', () => {
     const result = transformLighthouseToIssues({ ...makeAuditResult(), performance, raw });
     expect(result.performance).toEqual(performance);
     expect(result.raw).toEqual(raw);
+  });
+});
+
+/** Run one failing audit through the transform and return the resulting issue. */
+function transformSingleAudit(auditId: string): LighthouseIssue {
+  const result = makeAuditResult();
+  result.audits = {
+    [auditId]: {
+      id: auditId,
+      title: auditId,
+      description: '',
+      score: 0,
+      scoreDisplayMode: 'binary',
+      items: [{ selector: 'body' }],
+    },
+  };
+  const issue = transformLighthouseToIssues(result).issues[0];
+  if (!issue) throw new Error(`no issue for ${auditId}`);
+  return issue;
+}
+
+describe('Lighthouse audit to WCAG mapping', () => {
+  // Expected values are the WCAG tags on the axe-core 4.12 rule behind each audit.
+  it.each([
+    ['video-caption', '1.2.2'],
+    ['frame-title', '4.1.2'],
+    ['target-size', '2.5.8'],
+    ['label-content-name-mismatch', '2.5.3'],
+    ['identical-links-same-purpose', '2.4.9'],
+    ['form-field-multiple-labels', '3.3.2'],
+    ['link-in-text-block', '1.4.1'],
+    ['aria-required-children', '1.3.1'],
+  ])('maps %s to %s', (auditId, criterion) => {
+    expect(transformSingleAudit(auditId).wcagCriteria).toBe(criterion);
+  });
+
+  it('maps best-practice audits to no criterion and minor severity', () => {
+    for (const auditId of ['landmark-one-main', 'heading-order', 'tabindex', 'skip-link']) {
+      expect(isBestPracticeAudit(auditId)).toBe(true);
+      expect(transformSingleAudit(auditId)).toMatchObject({ wcagCriteria: 'unknown', severity: 'minor' });
+    }
+    expect(isBestPracticeAudit('image-alt')).toBe(false);
+  });
+
+  it('tells the model which audits are best practice', () => {
+    const compact = transformToCompactFormat([
+      transformSingleAudit('landmark-one-main'),
+      transformSingleAudit('image-alt'),
+    ]);
+    expect(compact.map((c) => c.wcag)).toEqual(['best-practice', '1.1.1']);
+  });
+
+  it('cross-references best-practice audits through their related criteria, never "unknown"', () => {
+    const criteria = lighthouseCrossReferenceCriteria([
+      transformSingleAudit('landmark-one-main'),
+      transformSingleAudit('color-contrast'),
+      { ...transformSingleAudit('image-alt'), auditId: 'some-future-audit', wcagCriteria: 'unknown' },
+    ]);
+    expect(criteria.sort()).toEqual(['1.3.1', '1.4.3', '2.4.1']);
   });
 });
 

@@ -25,7 +25,9 @@ import type {
 } from '../types.js';
 import { annotateScreenshot } from './annotator.js';
 import {
+  isBestPracticeAudit,
   LIGHTHOUSE_CATEGORY_VALUES,
+  lighthouseCrossReferenceCriteria,
   lighthouseService,
   transformLighthouseToIssues,
   type LighthouseCategory,
@@ -35,7 +37,7 @@ import {
 import { LLMService } from './llm.js';
 import { generateMarkdownFromStructured } from './markdown-generator.js';
 import { PlaywrightService } from './playwright.js';
-import { buildJsonScanPrompt, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
+import { buildJsonScanPrompt, findWcagCriterion, getWcagCriteria, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
 import { BlockedRequestError } from './request-guard.js';
 import { validateUrl } from './url-validator.js';
 
@@ -268,22 +270,47 @@ export function resolveLighthouseConfig(option: ScanOptions['lighthouse']): Reso
   return { categories: categories as LighthouseCategory[], includeRaw: option.includeRaw === true };
 }
 
-/** Build a structured report from Lighthouse findings alone (no-LLM mode). */
-function buildStructuredFromLighthouse(
+/** The `standard` string recorded on a scan, e.g. "WCAG 2.1 - AA". */
+function formatStandard(wcagVersion: WcagVersion, wcagLevel: WcagLevel): string {
+  return `WCAG ${wcagVersion} - ${wcagLevel}`;
+}
+
+/**
+ * Build a structured report from Lighthouse findings alone (no-LLM mode).
+ * Exported for tests; not part of the public API.
+ */
+export function buildStructuredFromLighthouse(
   lighthouse: LighthouseTransformedResult,
   url: string,
-  standard: string,
+  wcagVersion: WcagVersion,
+  wcagLevel: WcagLevel,
   pageTitle: string,
 ): StructuredScanOutput {
+  // Criteria in the requested version and level. Lighthouse runs the same
+  // audits for every standard, so some map to criteria outside it (2.5.8 is
+  // WCAG 2.2 only; 2.4.9 is AAA).
+  const requested = new Map(getWcagCriteria(wcagVersion, wcagLevel).map((c) => [c.id, c]));
+
   const issues = lighthouse.issues.map((lhIssue, i) => {
     const element = lhIssue.elements[0];
-    const severity = SEVERITY_FROM_LIGHTHOUSE[lhIssue.severity];
+    const criterion = findWcagCriterion(lhIssue.wcagCriteria);
+    // Best-practice audits and criteria outside the requested standard are not
+    // failures of that standard: report them as low, never as a failed criterion.
+    let wcagCriteria = lhIssue.wcagCriteria;
+    let severity = SEVERITY_FROM_LIGHTHOUSE[lhIssue.severity];
+    if (isBestPracticeAudit(lhIssue.auditId)) {
+      wcagCriteria = 'Best practice';
+    } else if (criterion && !requested.has(criterion.id)) {
+      wcagCriteria = `Outside WCAG ${wcagVersion} Level ${wcagLevel}: ${criterion.id} ${criterion.title}`;
+      severity = 'low';
+    }
     return normalizeIssue(
       {
         id: `lh-${lhIssue.auditId}-${i + 1}`,
         title: lhIssue.title,
         severity,
-        wcagCriteria: lhIssue.wcagCriteria,
+        wcagCriteria,
+        wcagLevel: criterion?.level,
         location: element?.selector || '',
         patternDetected: lhIssue.auditId,
         codeContext: element?.snippet ?? null,
@@ -299,7 +326,7 @@ function buildStructuredFromLighthouse(
 
   const failedCriteria = new Map<string, string[]>();
   for (const issue of issues) {
-    if (!issue.wcagCriteria) continue;
+    if (!requested.has(issue.wcagCriteria)) continue; // best practice, outside the standard, or unmapped
     const ids = failedCriteria.get(issue.wcagCriteria) ?? [];
     ids.push(issue.id);
     failedCriteria.set(issue.wcagCriteria, ids);
@@ -309,7 +336,7 @@ function buildStructuredFromLighthouse(
     overallScore: lighthouse.summary.lighthouseScore ?? 0,
     url,
     scanDate: new Date().toISOString(),
-    standard,
+    standard: formatStandard(wcagVersion, wcagLevel),
     statistics: {
       totalIssues: issues.length,
       criticalIssues: issues.filter((i) => i.severity === 'critical').length,
@@ -321,17 +348,20 @@ function buildStructuredFromLighthouse(
     },
     // Lighthouse only observes failures; it cannot attest that other criteria
     // passed, so coverage lists failed criteria only.
-    wcagCoverage: [...failedCriteria.entries()].map(([criteriaId, issueIds]) => ({
-      criteriaId,
-      name: issues.find((i) => i.wcagCriteria === criteriaId)?.title ?? criteriaId,
-      level: 'A' as const,
-      passed: false,
-      issues: issueIds,
-    })),
+    wcagCoverage: [...failedCriteria.entries()].map(([criteriaId, issueIds]) => {
+      const criterion = requested.get(criteriaId);
+      return {
+        criteriaId,
+        name: criterion?.title ?? criteriaId,
+        level: criterion?.level ?? 'A',
+        passed: false,
+        issues: issueIds,
+      };
+    }),
     issues,
     passedChecks: [],
     metadata: { pageTitle, engineMode: 'lighthouse-only' },
-    lighthouseWcagCriteria: [...failedCriteria.keys()],
+    lighthouseWcagCriteria: lighthouseCrossReferenceCriteria(lighthouse.issues),
   };
 }
 
@@ -375,7 +405,7 @@ export class A11yHawkEngine {
     const wcagVersion = options.wcagVersion ?? '2.1';
     const wcagLevel = options.wcagLevel ?? 'AA';
     // Format is parsed by the prompt builder; keep "WCAG <version> - <level>".
-    const standard = `WCAG ${wcagVersion} - ${wcagLevel}`;
+    const standard = formatStandard(wcagVersion, wcagLevel);
 
     const emit = (stage: ScanStage, message: string, screenshot?: string): void => {
       try {
@@ -587,7 +617,8 @@ export class A11yHawkEngine {
         structuredData = buildStructuredFromLighthouse(
           lighthouseResult as LighthouseTransformedResult,
           url,
-          standard,
+          wcagVersion,
+          wcagLevel,
           pageData.title,
         );
         pageData.screenshotTiles = [];
@@ -610,6 +641,9 @@ export class A11yHawkEngine {
             url: pageData.finalUrl || url,
             playwrightService: this.playwright,
             customHeaders: options.headers,
+            // Headers stay scoped to the origin the caller asked to scan, even
+            // when the page redirected elsewhere.
+            headerScopeUrl: url,
             jobLogger: log,
           });
           annotatedBuffer = annotationResult.annotatedBuffer;
@@ -686,7 +720,7 @@ export class A11yHawkEngine {
       structuredData.issues = structuredData.issues.map((issue, i) => normalizeIssue(issue, i));
 
       // Recalculate overallScore from wcagCoverage so the score always matches
-      // the compliance percentage.
+      // the share of checked criteria with no issues found.
       if (structuredData.wcagCoverage && structuredData.wcagCoverage.length > 0) {
         const passedCriteria = structuredData.wcagCoverage.filter((c) => c.passed).length;
         structuredData.overallScore = Math.round((passedCriteria / structuredData.wcagCoverage.length) * 100);
@@ -706,9 +740,7 @@ export class A11yHawkEngine {
 
       // Lighthouse criteria for cross-referencing with AI findings.
       if (lighthouseResult?.issues && lighthouseResult.issues.length > 0) {
-        structuredData.lighthouseWcagCriteria = [
-          ...new Set(lighthouseResult.issues.map((issue) => issue.wcagCriteria).filter(Boolean)),
-        ];
+        structuredData.lighthouseWcagCriteria = lighthouseCrossReferenceCriteria(lighthouseResult.issues);
       }
 
       log.info('Parsed structured scan data', {
