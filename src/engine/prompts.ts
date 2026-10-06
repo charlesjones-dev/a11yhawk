@@ -11,14 +11,14 @@ const BBB = '```'; // Triple backtick
 // WCAG Criteria Definitions for Dynamic Matrix Generation
 // ============================================================================
 
-interface WcagCriterion {
+export interface WcagCriterion {
   id: string;
   title: string;
   level: 'A' | 'AA' | 'AAA';
 }
 
 /**
- * WCAG 2.0 criteria (38 total: 25 A, 13 AA - no AAA included as it's rarely tested)
+ * WCAG 2.0 criteria (61 total: 25 A, 13 AA, 23 AAA)
  */
 const WCAG_2_0_CRITERIA: WcagCriterion[] = [
   // Principle 1: Perceivable
@@ -89,7 +89,7 @@ const WCAG_2_0_CRITERIA: WcagCriterion[] = [
 ];
 
 /**
- * WCAG 2.1 criteria (adds 17 new criteria to 2.0)
+ * WCAG 2.1 criteria (adds 17 new criteria to 2.0: 78 total, 30 A, 20 AA, 28 AAA)
  */
 const WCAG_2_1_CRITERIA: WcagCriterion[] = [
   ...WCAG_2_0_CRITERIA,
@@ -103,6 +103,8 @@ const WCAG_2_1_CRITERIA: WcagCriterion[] = [
   { id: '1.4.13', title: 'Content on Hover or Focus', level: 'AA' },
   // New in 2.1 - Operable
   { id: '2.1.4', title: 'Character Key Shortcuts', level: 'A' },
+  { id: '2.2.6', title: 'Timeouts', level: 'AAA' },
+  { id: '2.3.3', title: 'Animation from Interactions', level: 'AAA' },
   { id: '2.5.1', title: 'Pointer Gestures', level: 'A' },
   { id: '2.5.2', title: 'Pointer Cancellation', level: 'A' },
   { id: '2.5.3', title: 'Label in Name', level: 'A' },
@@ -114,7 +116,8 @@ const WCAG_2_1_CRITERIA: WcagCriterion[] = [
 ];
 
 /**
- * WCAG 2.2 criteria (adds 9 new criteria to 2.1, obsoletes 4.1.1)
+ * WCAG 2.2 criteria (adds 9 new criteria to 2.1 and removes the obsolete 4.1.1:
+ * 86 total, 31 A, 24 AA, 31 AAA)
  */
 const WCAG_2_2_CRITERIA: WcagCriterion[] = [
   ...WCAG_2_1_CRITERIA.filter((c) => c.id !== '4.1.1'), // 4.1.1 Parsing is obsoleted
@@ -169,6 +172,19 @@ function filterCriteriaByLevel(criteria: WcagCriterion[], level: string): WcagCr
 }
 
 /**
+ * Criteria for a WCAG version at a conformance level, sorted by number. Level A
+ * includes only A; AA includes A and AA; AAA includes all.
+ */
+export function getWcagCriteria(version: string, level: string): WcagCriterion[] {
+  return filterCriteriaByLevel(getCriteriaForVersion(version), level);
+}
+
+/** Look up a criterion by number across WCAG 2.0-2.2, including the obsolete 4.1.1. */
+export function findWcagCriterion(id: string): WcagCriterion | undefined {
+  return WCAG_2_2_CRITERIA.find((c) => c.id === id) ?? WCAG_2_0_CRITERIA.find((c) => c.id === id);
+}
+
+/**
  * Generate the WCAG Compliance Matrix section for the template
  */
 function generateWcagMatrix(version: string, level: string): string {
@@ -220,7 +236,7 @@ ${criteriaList}
 For each criterion:
 - If the page passes: { "criteriaId": "${criteria[0]?.id || '1.1.1'}", "name": "...", "level": "A", "passed": true }
 - If the page fails: { "criteriaId": "...", "name": "...", "level": "A", "passed": false, "issues": ["A-001"] }
-- If not applicable (e.g., no audio/video): Mark as passed: true (absence of issues = pass)`;
+- If not applicable (e.g., no audio/video) or not determinable from this page: passed: true with no issues. passed: true means no issues were found, not that the page conforms.`;
 }
 
 /**
@@ -830,7 +846,7 @@ export const SCAN_JSON_SYSTEM_PROMPT = `You are an elite Accessibility Scanner f
 
 ## 🚨 CRITICAL: Thoroughness Requirements 🚨
 
-**You MUST be exhaustively thorough.** Most real-world webpages have 8-20+ accessibility issues. If you find fewer than 5 issues, you are likely missing problems.
+**You MUST be exhaustively thorough.** Many real-world webpages have 8-20+ accessibility issues, so check every element. Simple pages can have few or none: report only what the page shows, and never add findings to reach a count.
 
 **Scan EVERY element systematically:**
 1. **Images**: Check EVERY image for alt text - missing, empty, or inadequate
@@ -841,24 +857,24 @@ export const SCAN_JSON_SYSTEM_PROMPT = `You are an elite Accessibility Scanner f
 6. **Color contrast**: Check ALL text, not just obvious issues
 7. **Focus indicators**: Are they visible? Do they have sufficient contrast?
 8. **Keyboard navigation**: Can all interactive elements be reached and activated?
-9. **Touch targets**: Are clickable elements at least 44x44px?
+9. **Target size**: Are clickable elements at least 24x24 CSS px or spaced apart (SC 2.5.8, WCAG 2.2 Level AA)?
 10. **ARIA**: Check for misuse, missing required attributes, redundant roles
 
 **Common issues you MUST NOT miss:**
 - Links that just say "Learn more" or "Click here" (vague link text)
 - Icons without text alternatives
 - Low contrast text (especially gray text on white backgrounds)
-- Missing skip navigation links
+- Repeated navigation or header blocks with no way to bypass them (skip link, landmarks, or headings)
 - Images with alt text that just describes the image instead of its purpose
 - Form inputs without visible labels
 - Focus indicators that are removed or barely visible
 - Small click/touch targets on mobile
 
 **CRITICAL ISSUES are common - look for them:**
-Most pages have 2-5 critical (Level A) issues. If you find 0 critical issues, double-check:
+If you find 0 critical issues, double-check:
 - Are ALL images checked for alt text? (SC 1.1.1)
 - Are ALL form inputs properly labeled? (SC 1.3.1, 4.1.2)
-- Is there a skip navigation link? (SC 2.4.1)
+- If blocks such as a header or navigation repeat across pages, can users bypass them? (SC 2.4.1)
 - Are interactive elements keyboard accessible? (SC 2.1.1)
 - Is content conveyed by color alone anywhere? (SC 1.4.1)
 
@@ -893,7 +909,7 @@ Most pages have 2-5 critical (Level A) issues. If you find 0 critical issues, do
   - Large text is 18pt+ (24px+) OR 14pt+ (18.66px+) bold
 - UI component contrast: minimum 3:1 for interactive elements and graphics
 - Never rely solely on color to convey information (SC 1.4.1)
-- Focus indicators must have 3:1 contrast against adjacent colors (SC 2.4.11)
+- Focus indicators need 3:1 contrast against adjacent colors (SC 1.4.11 Level AA; SC 2.4.13 Focus Appearance adds size rules at Level AAA)
 - Consider text readability on complex backgrounds (gradients, images, patterns)
 
 ### Forms & Input Accessibility
@@ -915,7 +931,7 @@ Most pages have 2-5 critical (Level A) issues. If you find 0 critical issues, do
 - State changes must be announced to screen readers
 
 ### Responsive & Mobile Accessibility
-- Touch target size: minimum 44×44 CSS pixels (Level AA - SC 2.5.5)
+- Target size: at least 24×24 CSS pixels or enough spacing (SC 2.5.8, Level AA, WCAG 2.2 only); 44×44 CSS pixels is Level AAA (SC 2.5.5)
 - Content must be fully usable at 320px viewport width
 - Support both portrait and landscape orientations
 - Pinch-zoom must not be disabled (user-scalable=no is a failure)
@@ -1044,7 +1060,7 @@ If you cannot find the specific code causing an issue, the issue likely doesn't 
 | WCAG Level | Default Severity | Rationale |
 |------------|------------------|-----------|
 | **Level A** | **critical** | Baseline accessibility - failures block access |
-| **Level AA** | **high** | Standard compliance target - failures significantly impair |
+| **Level AA** | **high** | Most common target level - failures significantly impair |
 | **Level AAA** | **medium** | Enhanced accessibility - failures reduce quality |
 
 ### Mandatory Critical Severity (No Exceptions)
@@ -1064,7 +1080,7 @@ You MAY downgrade severity in these specific cases:
 | Issue | Default | Downgrade To | When to Downgrade |
 |-------|---------|--------------|-------------------|
 | Missing \`lang\` attribute | critical (A) | high | Always - doesn't block content access |
-| Missing skip link | critical (A) | high | Page is short/simple with few sections |
+| Missing skip link | critical (A) | high | Repeated blocks exist but the page is short/simple with few sections |
 | Decorative image issues | critical (A) | high | Image is purely decorative, not content |
 | Contrast just below threshold | high (AA) | medium | Ratio is 4.0:1 to 4.49:1 (close to passing) |
 | Minor ARIA attribute issues | high (AA) | medium | Functionality still works, just suboptimal |
@@ -1077,6 +1093,30 @@ You MAY downgrade severity in these specific cases:
 **high**: Significantly impairs - Users can access content but with major difficulty
 **medium**: Reduces effectiveness - Users can complete tasks but experience is degraded  
 **low**: Enhancement opportunity - Minor improvements for better experience
+
+## Criteria That Need More Than One Page
+
+You see a single page. Some criteria depend on other pages of the site or on content this page may not have. Do not fail them without direct evidence on this page. When the page gives no evidence either way, the criterion is not applicable or cannot be determined: set passed: true with no issues (the report shows this as "no issues found", not as a pass).
+
+- **2.4.5 Multiple Ways** and **2.4.8 Location** apply to a set of pages. One page cannot show whether a search, site map, or other route to it exists elsewhere. Never fail them for a standalone page that is not part of a set.
+- **2.4.1 Bypass Blocks** needs blocks of content repeated across pages, such as a site header or navigation. With no repeated blocks it does not apply. Landmarks or headings that let users jump past the repeated blocks also satisfy it, so a missing skip link is not a failure when they are present.
+- **3.3.5 Help** applies only where the page has inputs that need help, such as a form field with format rules. A page without such inputs does not fail it.
+
+## Best Practice Items
+
+Some problems are best practices rather than WCAG failures. Lighthouse marks these with "wcag": "best-practice". Report them as low severity, never as a failure of a criterion:
+- severity: "low", fixPriority: "Low Priority"
+- wcagCriteria: the closest related criterion followed by "(best practice)", for example "1.3.1 Info and Relationships (best practice)", and wcagLevel set to that criterion's level
+- Do not add the issue ID to any criterion in wcagCoverage, and do not mark a criterion failed because of it
+
+A missing <main> landmark on its own is a best practice item (axe rule landmark-one-main). Report it as above, related to 1.3.1. Mark 1.3.1 or 2.4.1 failed only for a concrete failure of that criterion, such as content structure that is not exposed to assistive technology, or repeated navigation with no way to bypass it.
+
+## Report Language
+
+Your text appears in reports that site owners read. Write it plainly:
+- Describe what you checked and what you found. Never state or predict that the page or site is compliant, conformant, or accessible, or that a fix will make it so.
+- Be specific: name the element and the people affected. Do not use filler words such as "comprehensive", "robust", "seamless", or "actionable".
+- Do not use emoji, exclamation marks, or em dashes.
 
 ## JSON Output Requirements
 
@@ -1115,7 +1155,7 @@ interface StructuredScanOutput {
     location: string; // CSS selector or description
     patternDetected: string;
     codeContext: string | null; // Exact HTML or null if missing/not found
-    impact: string; // WCAG compliance impact
+    impact: string; // Which WCAG criterion this fails and how
     userImpact: string; // Real-world impact on users
     recommendation: string;
     fixPriority: "Immediate" | "High Priority" | "Medium Priority" | "Low Priority";
@@ -1292,7 +1332,7 @@ ${CONTENT_MARKERS.LIGHTHOUSE_END}
 - Lighthouse cannot detect: visual issues (contrast on images/gradients), keyboard navigation problems, focus visibility, reading order, many ARIA issues, and more
 - Your independent analysis is the primary value - Lighthouse findings are just a starting point
 
-Map Lighthouse severity: critical/serious -> critical/high, moderate -> medium, minor -> low.
+Map Lighthouse severity: critical/serious -> critical/high, moderate -> medium, minor -> low. Exception: audits with "wcag": "best-practice" are best practice items and are always low (see Best Practice Items).
 
 ---
 `;

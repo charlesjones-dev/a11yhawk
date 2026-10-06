@@ -25,7 +25,9 @@ import type {
 } from '../types.js';
 import { annotateScreenshot } from './annotator.js';
 import {
+  isBestPracticeAudit,
   LIGHTHOUSE_CATEGORY_VALUES,
+  lighthouseCrossReferenceCriteria,
   lighthouseService,
   transformLighthouseToIssues,
   type LighthouseCategory,
@@ -35,7 +37,7 @@ import {
 import { LLMService } from './llm.js';
 import { generateMarkdownFromStructured } from './markdown-generator.js';
 import { PlaywrightService } from './playwright.js';
-import { buildJsonScanPrompt, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
+import { buildJsonScanPrompt, findWcagCriterion, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
 import { BlockedRequestError } from './request-guard.js';
 import { validateUrl } from './url-validator.js';
 
@@ -268,8 +270,11 @@ export function resolveLighthouseConfig(option: ScanOptions['lighthouse']): Reso
   return { categories: categories as LighthouseCategory[], includeRaw: option.includeRaw === true };
 }
 
-/** Build a structured report from Lighthouse findings alone (no-LLM mode). */
-function buildStructuredFromLighthouse(
+/**
+ * Build a structured report from Lighthouse findings alone (no-LLM mode).
+ * Exported for tests; not part of the public API.
+ */
+export function buildStructuredFromLighthouse(
   lighthouse: LighthouseTransformedResult,
   url: string,
   standard: string,
@@ -283,7 +288,9 @@ function buildStructuredFromLighthouse(
         id: `lh-${lhIssue.auditId}-${i + 1}`,
         title: lhIssue.title,
         severity,
-        wcagCriteria: lhIssue.wcagCriteria,
+        // Best-practice audits are not WCAG failures and have no criterion
+        wcagCriteria: isBestPracticeAudit(lhIssue.auditId) ? 'Best practice' : lhIssue.wcagCriteria,
+        wcagLevel: findWcagCriterion(lhIssue.wcagCriteria)?.level,
         location: element?.selector || '',
         patternDetected: lhIssue.auditId,
         codeContext: element?.snippet ?? null,
@@ -299,7 +306,7 @@ function buildStructuredFromLighthouse(
 
   const failedCriteria = new Map<string, string[]>();
   for (const issue of issues) {
-    if (!issue.wcagCriteria) continue;
+    if (!findWcagCriterion(issue.wcagCriteria)) continue; // best practice or unmapped
     const ids = failedCriteria.get(issue.wcagCriteria) ?? [];
     ids.push(issue.id);
     failedCriteria.set(issue.wcagCriteria, ids);
@@ -321,17 +328,20 @@ function buildStructuredFromLighthouse(
     },
     // Lighthouse only observes failures; it cannot attest that other criteria
     // passed, so coverage lists failed criteria only.
-    wcagCoverage: [...failedCriteria.entries()].map(([criteriaId, issueIds]) => ({
-      criteriaId,
-      name: issues.find((i) => i.wcagCriteria === criteriaId)?.title ?? criteriaId,
-      level: 'A' as const,
-      passed: false,
-      issues: issueIds,
-    })),
+    wcagCoverage: [...failedCriteria.entries()].map(([criteriaId, issueIds]) => {
+      const criterion = findWcagCriterion(criteriaId);
+      return {
+        criteriaId,
+        name: criterion?.title ?? criteriaId,
+        level: criterion?.level ?? 'A',
+        passed: false,
+        issues: issueIds,
+      };
+    }),
     issues,
     passedChecks: [],
     metadata: { pageTitle, engineMode: 'lighthouse-only' },
-    lighthouseWcagCriteria: [...failedCriteria.keys()],
+    lighthouseWcagCriteria: lighthouseCrossReferenceCriteria(lighthouse.issues),
   };
 }
 
@@ -689,7 +699,7 @@ export class A11yHawkEngine {
       structuredData.issues = structuredData.issues.map((issue, i) => normalizeIssue(issue, i));
 
       // Recalculate overallScore from wcagCoverage so the score always matches
-      // the compliance percentage.
+      // the share of checked criteria with no issues found.
       if (structuredData.wcagCoverage && structuredData.wcagCoverage.length > 0) {
         const passedCriteria = structuredData.wcagCoverage.filter((c) => c.passed).length;
         structuredData.overallScore = Math.round((passedCriteria / structuredData.wcagCoverage.length) * 100);
@@ -709,9 +719,7 @@ export class A11yHawkEngine {
 
       // Lighthouse criteria for cross-referencing with AI findings.
       if (lighthouseResult?.issues && lighthouseResult.issues.length > 0) {
-        structuredData.lighthouseWcagCriteria = [
-          ...new Set(lighthouseResult.issues.map((issue) => issue.wcagCriteria).filter(Boolean)),
-        ];
+        structuredData.lighthouseWcagCriteria = lighthouseCrossReferenceCriteria(lighthouseResult.issues);
       }
 
       log.info('Parsed structured scan data', {
