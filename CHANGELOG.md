@@ -8,7 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.3.0] - 2026-10-06
 
-Report text and custom header handling change in ways hosts and report readers can see. `StructuredScanOutput` and the other result types keep their shape; only their doc comments changed.
+This release contains breaking behavior changes. No exported function, option name, error code, or result type changed shape (`StructuredScanOutput` and the other result types only gained doc comments), but custom header handling, report text, and some structured data values changed in ways existing integrations can notice. Read Breaking changes before upgrading.
+
+### Breaking changes
+
+- **Custom headers no longer reach other origins.** `headers` entries of type `header` and `authorization` are sent only to requests whose origin (scheme, host, and port) matches the scan URL. A page that calls an API on another origin, including a sibling subdomain (`api.example.com` from `app.example.com`), the `www`/bare variant, or `http` instead of `https`, now makes those calls without the custom headers or bearer token. Pass the URL the page finally lands on; there is no option to widen the scope.
+- **`Cookie` header entries become scoped cookies.** A `header` entry named `Cookie` (including CLI `--header "Cookie: a=1"`) was sent as a raw header on every request to every host. It is now split into cookies set for the scan URL, which the browser sends only to that host and to paths under the scan URL's directory: scanning `/app/dashboard` covers `/app/`, not `/api/`. `cookie` entries have always been scoped this way.
+- **Report text changed.** Headings, table columns, and labels in the markdown and HTML reports changed (see Changed). Code that parses `report.markdown` or the HTML report by heading text, emoji, or the old "Status" and "Priority" columns needs updating. The markdown criteria table still has five columns in the same order.
+- **Structured data values changed.**
+  - `LighthouseIssue.wcagCriteria` is corrected for many audits and is `"unknown"` for best-practice audits, which now get `minor` severity, so `summary.bySeverity` counts shift.
+  - `lighthouseWcagCriteria` no longer contains `"unknown"` and now includes the related criteria of best-practice audits.
+  - In Lighthouse-only mode, `issues[].wcagCriteria` can be `"Best practice"` or `"Outside WCAG <version> Level <level>: <criterion>"` (those issues are `low` severity), and `wcagCoverage` lists only criteria in the requested version and level. Code that expects `wcagCriteria` to start with a criterion number must handle these values.
+- **Scores can shift.** WCAG 2.1 and 2.2 Level AAA scans now assess 78 and 86 criteria (was 76 and 84), and the prompt no longer pushes the model to fail site-level criteria or to reach an issue count, so LLM-mode `overallScore` values may rise compared with earlier scans of the same page. Review `--fail-below` thresholds and score history comparisons. The Lighthouse-only score is unchanged.
 
 ### Security
 
