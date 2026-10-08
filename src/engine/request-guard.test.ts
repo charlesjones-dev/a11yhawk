@@ -15,6 +15,7 @@ import {
   checkRequestTarget,
   clearDnsVerdictCache,
   createGuardedAgent,
+  installBrowserRequestGuard,
   installRequestGuard,
   lookupPublicAddress,
   BlockedRequestError,
@@ -105,7 +106,7 @@ describe('Request Guard — checkRequestTarget', () => {
       mockLookup.mockResolvedValue([{ address: '10.0.0.5', family: 4 }]);
       const verdict = await checkRequestTarget('https://rebind.evil.test/');
       expect(verdict.allowed).toBe(false);
-      expect(verdict.reason).toContain('10.0.0.5');
+      expect(verdict.resolvedAddress).toBe('10.0.0.5');
     });
 
     it('should block a hostname that resolves to loopback', async () => {
@@ -417,6 +418,91 @@ describe('Request Guard — installRequestGuard', () => {
     const blocked = await env.routeRequest({ url: 'ftp://127.0.0.1/', isNavigation: true });
     expect(blocked.abort).toHaveBeenCalledWith('blockedbyclient');
     expect(guard.violation?.url).toBe('ftp://127.0.0.1/');
+  });
+});
+
+describe('Request Guard — installBrowserRequestGuard', () => {
+  /** Browser-level CDP session double: records commands and lets tests pause requests. */
+  function fakeBrowserSession() {
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const sent: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    let settle: () => void = () => {};
+    let settled = new Promise<void>((resolve) => (settle = resolve));
+    const session = {
+      on(event: string, listener: (payload: unknown) => void) {
+        listeners.set(event, listener);
+        return session;
+      },
+      async send(method: string, params?: Record<string, unknown>) {
+        sent.push({ method, params });
+        if (method !== 'Fetch.enable') settle();
+        return {};
+      },
+    };
+    return {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: session as any,
+      sent,
+      /** Pause one request and wait for the guard's continue/fail command. */
+      async pause(url: string) {
+        settled = new Promise<void>((resolve) => (settle = resolve));
+        listeners.get('Fetch.requestPaused')?.({ requestId: 'r1', request: { url } });
+        await settled;
+        return sent[sent.length - 1];
+      },
+    };
+  }
+
+  it('enables Fetch interception for every request at the request stage', async () => {
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger);
+    expect(fake.sent[0]).toEqual({
+      method: 'Fetch.enable',
+      params: { patterns: [{ urlPattern: '*', requestStage: 'Request' }] },
+    });
+  });
+
+  it('continues a request to a public target', async () => {
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger);
+    expect(await fake.pause('https://example.com/app.js')).toEqual({
+      method: 'Fetch.continueRequest',
+      params: { requestId: 'r1' },
+    });
+  });
+
+  it('fails a request to a private IP literal', async () => {
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger);
+    expect(await fake.pause('http://169.254.169.254/latest/meta-data/')).toEqual({
+      method: 'Fetch.failRequest',
+      params: { requestId: 'r1', errorReason: 'BlockedByClient' },
+    });
+  });
+
+  it('fails a request whose hostname resolves to a private address and logs the address', async () => {
+    mockLookup.mockResolvedValue([{ address: '10.0.0.5', family: 4 }]);
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger);
+    expect((await fake.pause('https://rebind.evil.test/'))?.method).toBe('Fetch.failRequest');
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Blocked browser request to disallowed target',
+      expect.objectContaining({ blockedUrl: 'https://rebind.evil.test/', resolvedAddress: '10.0.0.5' }),
+    );
+  });
+
+  it('fails closed on an unexpected resolver error', async () => {
+    mockLookup.mockRejectedValue(dnsError('ESERVFAIL'));
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger);
+    expect((await fake.pause('https://example.com/'))?.method).toBe('Fetch.failRequest');
+  });
+
+  it('lets non-http(s) schemes through without a check', async () => {
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger);
+    expect((await fake.pause('data:text/plain,hi'))?.method).toBe('Fetch.continueRequest');
+    expect(mockLookup).not.toHaveBeenCalled();
   });
 });
 

@@ -7,6 +7,7 @@
  * Sanitizes:
  * - API keys (OpenRouter, Anthropic, OpenAI patterns)
  * - Bearer tokens
+ * - URL credentials: userinfo and token-like query values
  * - Database connection strings (MongoDB, Redis)
  * - Generic secrets and passwords
  *
@@ -124,6 +125,25 @@ const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; name: string; isConnectionStr
   { pattern: /[a-fA-F0-9]{64,}/g, name: 'Hex-encoded secret' },
 ];
 
+// http(s), ws(s), and ftp URLs, which reach the logs whole (scan targets, blocked requests).
+// A fixed scheme list keeps the scan linear: no unbounded run precedes the literal "://".
+const URL_PATTERN = /\b(?:https?|wss?|ftp):\/\/[^\s"'<>]+/gi;
+
+// Query parameter names whose values are credentials: anything ending in token, secret,
+// password, signature, credential, api key, access key, session id, or auth, plus a few
+// short names (key, sig, code, jwt, pass, pwd).
+const SENSITIVE_QUERY_PARAM =
+  /(?:token|secret|passw(?:or)?d|signature|credential|api[-_]?key|access[-_]?key|sess(?:ion)?(?:[-_]?id)?|auth(?:orization)?)$|^(?:key|sig|code|jwt|pass|pwd)$/i;
+
+/** Mask a URL's userinfo and the values of its credential-like query parameters. */
+function maskUrlCredentials(url: string): string {
+  return url
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/?#]*@/i, `$1${MASK}@`)
+    .replace(/([?&;])([^=&;#]*)=([^&;#]*)/g, (match, separator: string, name: string, value: string) =>
+      value !== '' && SENSITIVE_QUERY_PARAM.test(name) ? `${separator}${name}=${MASK}` : match,
+    );
+}
+
 /**
  * Sanitize a string value by masking sensitive patterns
  *
@@ -141,7 +161,7 @@ export function sanitizeString(str: string): string {
     return str;
   }
 
-  let sanitized = str;
+  let sanitized = str.replace(URL_PATTERN, maskUrlCredentials);
 
   for (const { pattern, isConnectionString } of SENSITIVE_PATTERNS) {
     // Reset regex state (important for global regexes)

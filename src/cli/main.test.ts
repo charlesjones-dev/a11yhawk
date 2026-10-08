@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScanErrorCode } from '../engine/scan.js';
 import {
   buildScanOptions,
   CliConfigError,
+  createCliLogger,
   EXIT_FOR_SCAN_ERROR,
   EXIT_SCAN_ERROR,
   exitCodeForScanError,
@@ -273,5 +274,42 @@ describe('exitCodeForScanError', () => {
 
   it('has a mapping for exactly the known codes (no gaps, no extras)', () => {
     expect(Object.keys(EXIT_FOR_SCAN_ERROR).sort()).toEqual([...codes].sort());
+  });
+});
+
+describe('createCliLogger', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function capture(): string[] {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    return lines;
+  }
+
+  it('sanitizes the message and context like the default logger', () => {
+    const lines = capture();
+    const logger = createCliLogger('debug');
+
+    logger.info('Lighthouse audit starting https://u:p@example.com/', {
+      url: 'https://example.com/?token=secret-value',
+      apiKey: 'sk-or-v1-0123456789abcdef0123456789abcdef',
+    });
+
+    const output = lines.join('');
+    expect(output).not.toContain('u:p@');
+    expect(output).not.toContain('secret-value');
+    expect(output).not.toContain('sk-or-v1-');
+    expect(output).toContain('[REDACTED]');
+  });
+
+  it('still filters by level', () => {
+    const lines = capture();
+    createCliLogger('error').warn('hidden');
+    expect(lines).toEqual([]);
   });
 });

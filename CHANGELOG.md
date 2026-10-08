@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.5.0] - 2026-10-08
+
+This release contains breaking behavior changes. No exported function, option name, error code, or result type changed shape, but an invalid API key now fails with a different error code, some error messages and LLM-mode scores changed, more IPv6 targets are refused, and the Lighthouse child no longer inherits the environment. Read Breaking changes before upgrading.
+
+### Breaking changes
+
+- **An invalid or expired API key fails as non-retryable `llm-auth`.** The engine matched LLM error text against a pattern its own 401 message did not fit, so a rejected key surfaced as retryable `llm-failed` and queue-based hosts retried it. LLM failures are now classified by the endpoint's HTTP status: 401 is `llm-auth` and 429 is `llm-rate-limit`, both non-retryable as documented, and the `llm-auth` message no longer starts with `LLM analysis failed:`. Every other failure stays retryable `llm-failed`.
+- **Refusal messages no longer name the private address.** A scan URL whose hostname resolves to a private address now fails with `Domain resolves to a private or reserved IP address.` instead of `Domain resolves to private IP address (10.0.0.5)`, and a request guard block says `hostname resolves to a private or reserved address`. The address goes to the log as `resolvedAddress`. Code that read the address from `ScanError.message` needs updating.
+- **LLM output is normalized, which can change scores and values.**
+  - `overallScore` is always recomputed from `wcagCoverage` and is `0` when the model returns no coverage; it used to keep the model's own number. A coverage row counts as passed only when `passed` is the boolean `true`.
+  - `structured.url` is always the URL passed to `scan()`, not the model's copy of it.
+  - `severity`, `wcagLevel`, and `fixPriority` are matched case-insensitively against their allowed values, so `"Critical"` becomes `critical` and now counts in `statistics.criticalIssues`. Anything else falls back to `medium`, `A`, or the priority for the severity.
+  - Text fields that are not strings become `''`, entries in `issues`, `wcagCoverage`, and `passedChecks` that are not objects are dropped, and a missing `wcagCoverage` or `passedChecks` becomes `[]`.
+
+  Output from a well-behaved model changes only in letter case and `url`. Lighthouse-only results are unchanged.
+
+- **More IPv6 targets are refused.** IPv4-compatible (`::a.b.c.d`), IPv4-translated, site-local (`fec0::/10`), and multicast (`ff00::/8`) addresses, the IETF protocol range `2001::/23` (Teredo, benchmarking, ORCHID), `3fff::/20`, `5f00::/16`, the whole local-use NAT64 prefix `64:ff9b:1::/48`, and well-known NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`) addresses that embed a private IPv4 address now fail validation and the request guard, whether written as literals or returned by DNS. Public sites reached through the well-known NAT64 prefix keep working; a host whose DNS64 uses the local-use prefix needs `allowPrivateNetworks`.
+- **The Lighthouse child gets an allowlisted environment.** It receives only `PATH`, `HOME`, `USERPROFILE`, `TMPDIR`, `TMP`, `TEMP`, `SystemRoot`, `LANG`, `LC_ALL`, and `CHROME_PATH`. Settings that reached Lighthouse through other variables, such as `NODE_OPTIONS`, no longer do.
+
+### Security
+
+- **Page scripts could reach internal services during the Lighthouse audit.** Lighthouse opens its own page in the shared browser, outside the browser context the request guard watches, so while it audited, the scanned page's JavaScript could fetch an internal address such as a cloud metadata service and post the response to its own origin. Chromium's Local Network Access blocks a public page's fetches to private addresses, which narrowed this in practice, but the engine enforced nothing. A second guard now intercepts every request in the browser over the DevTools protocol and refuses private and reserved targets, covering Lighthouse's page and its iframes, workers, and service workers. It also refuses a redirect to a private address before the request is sent, so the capture stage no longer makes one blind request to such a redirect target before closing the page. WebSocket connections are still not intercepted.
+- **Model output could pass the CI gate and break reports.** The score was recomputed only when the model returned a non-empty `wcagCoverage`, so a page that steered the model into a score of 100 with no coverage, or a string score, passed any `--fail-below` threshold whatever issues were found. An unknown severity or a missing `wcagCoverage` or `passedChecks` made the HTML report throw (`500` from the server's `report.html`, exit code 2 from the CLI), a missing `wcagCoverage` failed the scan as a retryable `capture-failed`, and the model's `url` replaced the scanned URL in the report headline. See Breaking changes for the new rules. `renderHtmlReport` also tolerates these values in stored reports.
+- **Several IPv6 forms bypassed the private-address check.** See Breaking changes for the ranges. Whether one reached anything depended on the host's routing: a NAT64 gateway, for example, delivers `64:ff9b::a9fe:a9fe` to `169.254.169.254`.
+- **The Lighthouse child inherited secrets and could report errors.** It received the full parent environment, including `A11YHAWK_API_KEY` in CLI runs. Lighthouse also honors a Sentry error-reporting consent saved by any earlier interactive `lighthouse` run on the machine, so it could upload scan URLs and error details. Error reporting is now pinned off with `--no-enable-error-reporting`.
+- **Refusals revealed internal DNS.** Rejecting a scan URL echoed the private address its hostname resolved to, so a server client could map internal names one submission at a time.
+- **Logs printed URL credentials.** The built-in logger now masks URL userinfo and token-like query values (`token`, `key`, `sig`, `code`, `password`, `X-Amz-Signature`, and similar). The CLI logger, which masked nothing, now masks the same way.
+- **Supply chain.** Workflow actions are pinned to commit SHAs, the release job installs an exact npm version instead of `npm@latest`, and the Docker base image is pinned by digest alongside its Playwright version tag.
+
+### Changed
+
+- **Server request timeout.** `a11yhawk serve` gives a client 30 seconds to send its request; Node's default is 5 minutes.
+- **Security documentation.** The README now covers the shared browser's unauthenticated DevTools port and how to deploy around it, the exact scope of scan cookies (host-only, any port, and both schemes for an `http` target), the open `/healthz` endpoint, and that a custom `logger` receives values unmasked.
+
 ## [0.4.0] - 2026-10-08
 
 This release contains breaking behavior changes. No exported function, option name, error code, or result type changed shape, but an `llm.baseUrl` on a private network is now refused, LLM error messages changed, and the server can answer `503`. Read Breaking changes before upgrading.

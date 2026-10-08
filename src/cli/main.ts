@@ -31,7 +31,7 @@ import type {
   ScanProgressEvent,
   ScanReport,
 } from '../engine/scan.js';
-import type { LogContext, Logger, LogLevel } from '../logger/index.js';
+import { sanitize, sanitizeString, type LogContext, type Logger, type LogLevel } from '../logger/index.js';
 import { runServe } from '../server/serve.js';
 import type { ScanHeader, WcagLevel, WcagVersion } from '../types.js';
 import { runDoctor } from './doctor.js';
@@ -355,11 +355,12 @@ const LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error
  * info/debug to stdout, which would corrupt --stdout JSON; routing to stderr
  * keeps stdout reserved for the report.
  */
-function createCliLogger(level: LogLevel): Logger {
+export function createCliLogger(level: LogLevel): Logger {
   const emit = (entryLevel: LogLevel, message: string, context?: LogContext): void => {
     if (LEVEL_RANK[entryLevel] < LEVEL_RANK[level]) return;
-    const suffix = context && Object.keys(context).length > 0 ? ` ${JSON.stringify(context)}` : '';
-    process.stderr.write(`${entryLevel}: ${message}${suffix}\n`);
+    // Same masking as the default logger: keys, tokens, and URL credentials.
+    const suffix = context && Object.keys(context).length > 0 ? ` ${JSON.stringify(sanitize(context))}` : '';
+    process.stderr.write(`${entryLevel}: ${sanitizeString(message)}${suffix}\n`);
   };
   const logger: Logger = {
     debug: (message, context) => emit('debug', message, context),

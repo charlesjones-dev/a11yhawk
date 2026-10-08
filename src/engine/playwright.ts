@@ -4,7 +4,7 @@ import net from 'net';
 import type { ScanHeader } from '../types.js';
 import type { Logger } from '../logger/index.js';
 import { createLogger } from '../logger/index.js';
-import { installRequestGuard } from './request-guard.js';
+import { installBrowserRequestGuard, installRequestGuard } from './request-guard.js';
 import { installScopedHeaders } from './scoped-headers.js';
 
 /**
@@ -358,6 +358,17 @@ export class PlaywrightService {
       // Playwright 1.57's implicit deadline expires after ~24.9 days of process
       // uptime. An explicit timeout keeps connections working in long-lived hosts.
       this.browser = await chromium.connect(this.browserServer.wsEndpoint(), { timeout: 30_000 });
+
+      // Lighthouse audits in its own page over the CDP port, outside the capture
+      // contexts' request guard, so guard the whole browser as well.
+      if (!this.allowPrivateNetworks) {
+        try {
+          await installBrowserRequestGuard(await this.browser.newBrowserCDPSession(), log);
+        } catch (error) {
+          await this.cleanup();
+          throw error;
+        }
+      }
 
       log.info('Browser server ready', { cdpPort: this.cdpPort });
     }

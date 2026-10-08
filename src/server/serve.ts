@@ -42,6 +42,9 @@ import type { GenerationParams, ScanHeader, ScanHeaderType, WcagLevel, WcagVersi
 /** Maximum accepted request body. Scan requests are tiny; anything larger is rejected. */
 const MAX_BODY_BYTES = 64 * 1024;
 
+/** Time a client gets to send its whole request (Node's default is 5 minutes). */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /** Placeholder written over a stored API key once a scan starts. */
 const REDACTED = '[redacted]';
 
@@ -612,6 +615,9 @@ export function createA11yHawkServer(config: A11yHawkServerConfig): A11yHawkServ
       else res.end();
     });
   });
+
+  // Bodies are at most 64 KB; a client still sending after the timeout is holding a socket.
+  httpServer.requestTimeout = REQUEST_TIMEOUT_MS;
 
   const sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
   sweepTimer.unref();

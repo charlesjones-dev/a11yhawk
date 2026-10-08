@@ -5,7 +5,9 @@
 # Base is the official Playwright image whose tag is pinned to the exact
 # `playwright` dependency version (1.57.0): it bakes in a matching Chromium plus
 # every system library the browser and Lighthouse need. Building on anything
-# else means fighting missing shared libraries.
+# else means fighting missing shared libraries. The digest pins the multi-arch
+# index the tag pointed to, so a re-pushed tag cannot change the build; bump both
+# together (`docker buildx imagetools inspect <image>:<tag>` prints the digest).
 #
 # Multi-stage: the build stage compiles TypeScript to dist/ with the full
 # dependency tree; the runtime stage carries only production dependencies and
@@ -13,7 +15,7 @@
 # Chromium sandbox left enabled.
 
 # ---- build stage ------------------------------------------------------------
-FROM mcr.microsoft.com/playwright:v1.57.0-noble AS build
+FROM mcr.microsoft.com/playwright:v1.57.0-noble@sha256:3bed4b1a12f2338642f3d8cba28e291deef3c66bd4a964bbeb3e57bbff511dbd AS build
 
 WORKDIR /app
 
@@ -26,7 +28,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- runtime stage ----------------------------------------------------------
-FROM mcr.microsoft.com/playwright:v1.57.0-noble AS runtime
+FROM mcr.microsoft.com/playwright:v1.57.0-noble@sha256:3bed4b1a12f2338642f3d8cba28e291deef3c66bd4a964bbeb3e57bbff511dbd AS runtime
 
 ENV NODE_ENV=production
 # Default listen port; overridable at runtime. Kept in sync with EXPOSE below.

@@ -78,6 +78,21 @@ function sanitizeErrorMessage(error: unknown): string {
   return message.replace(/sk-[a-zA-Z0-9-_]+/g, '[REDACTED]');
 }
 
+/**
+ * A failed LLM request. `status` is the endpoint's HTTP status when it answered, so callers
+ * classify failures by status rather than by message text.
+ */
+export class LlmRequestError extends Error {
+  readonly status: number | undefined;
+
+  // Takes no `cause`: the provider error can embed the API key (see generateScan).
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'LlmRequestError';
+    this.status = status;
+  }
+}
+
 /** Provider usage counters are untrusted input: keep finite numbers, drop anything else. */
 function usageCount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -364,23 +379,20 @@ export class LLMService {
       }
 
       // Provide specific error for API key issues (401 Unauthorized)
-      if (errorStatus === 401 || errorMessage?.includes('401')) {
-        // eslint-disable-next-line preserve-caught-error
-        throw new Error('API key is invalid or expired. Please check your OpenRouter API key.');
+      if (errorStatus === 401) {
+        throw new LlmRequestError('API key is invalid or expired. Please check your OpenRouter API key.', 401);
       }
 
       // Provide specific error for rate limiting (429 Too Many Requests)
-      if (errorStatus === 429 || errorMessage?.includes('429')) {
-        // eslint-disable-next-line preserve-caught-error
-        throw new Error('Rate limit exceeded. Please wait a moment or try another model.');
+      if (errorStatus === 429) {
+        throw new LlmRequestError('Rate limit exceeded. Please wait a moment or try another model.', 429);
       }
 
       // Any other HTTP error: report the status only. The SDK's message embeds the
       // endpoint's response body, which is logged above but must not travel back to
       // whoever chose the endpoint (a server client, through GET /scans/:id).
       if (typeof errorStatus === 'number') {
-        // eslint-disable-next-line preserve-caught-error
-        throw new Error(`LLM request failed with HTTP ${errorStatus}.`);
+        throw new LlmRequestError(`LLM request failed with HTTP ${errorStatus}.`, errorStatus);
       }
 
       // Sanitize and throw generic error for other cases

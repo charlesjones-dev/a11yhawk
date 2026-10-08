@@ -142,13 +142,14 @@ describe('buildLighthouseCliArgs', () => {
     expect(args.some((a) => a.startsWith('--chrome-flags='))).toBe(false);
   });
 
-  it('defaults to accessibility-only args identical to the pre-categories behavior', () => {
+  it('defaults to accessibility-only args', () => {
     expect(buildLighthouseCliArgs('https://example.com/', ['accessibility'], 9222)).toEqual([
       'https://example.com/',
       '--output=json',
       '--output-path=stdout',
       '--only-categories=accessibility',
       '--quiet',
+      '--no-enable-error-reporting',
       '--port=9222',
     ]);
   });
