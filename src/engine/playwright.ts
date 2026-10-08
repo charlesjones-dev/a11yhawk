@@ -1,7 +1,7 @@
 import { chromium, type Browser, type BrowserServer } from 'playwright';
 import sharp from 'sharp';
 import net from 'net';
-import type { ScanHeader } from '../types.js';
+import type { LlmProvider, ScanHeader } from '../types.js';
 import type { Logger } from '../logger/index.js';
 import { createLogger } from '../logger/index.js';
 import { installBrowserRequestGuard, installRequestGuard } from './request-guard.js';
@@ -48,10 +48,27 @@ export const PROVIDER_IMAGE_LIMITS: Record<string, number> = {
 };
 
 /**
- * Get the max image dimension for a given model ID.
- * Extracts provider from model ID prefix (e.g., "anthropic/claude-sonnet-4.5" -> "anthropic")
+ * Tile edge for the Anthropic provider (the Claude API called directly), whatever the model
+ * ID looks like. Claude downscales any image over 2576 px on the long edge or 4784 visual
+ * tokens (28x28 px patches) on high-resolution models (Claude 4.7 and later), and once a
+ * request carries more than 20 images it rejects any image over 2000 px on either side.
+ * An 8000 px tile from the 1920 px viewport would be shrunk to about 618 px wide. A
+ * 1932 px tile is the largest 1920 px-wide one that is never downscaled: ceil(1920/28) x
+ * ceil(1932/28) = 69 x 69 = 4761 tokens. Wider pages are first scaled to 1932 px wide, which
+ * keeps every tile at 69 x 69 patches or fewer, and 1932 px is under the 2000 px many-image
+ * limit, so a long page can use any number of tiles up to the request's image limit.
+ * Standard-resolution models (1568 px / 1568 tokens) still downscale these tiles.
+ * https://platform.claude.com/docs/en/build-with-claude/vision
  */
-export function getMaxImageDimension(modelId: string): number {
+export const ANTHROPIC_TILE_DIMENSION = 1932;
+
+/**
+ * Get the max image dimension for a scan. The Anthropic provider gets
+ * ANTHROPIC_TILE_DIMENSION; otherwise the provider is read from the model ID prefix (e.g.,
+ * "anthropic/claude-sonnet-4.5" -> "anthropic").
+ */
+export function getMaxImageDimension(modelId: string, llmProvider?: LlmProvider): number {
+  if (llmProvider === 'anthropic') return ANTHROPIC_TILE_DIMENSION;
   const provider = modelId.split('/')[0]?.toLowerCase() || 'default';
   return PROVIDER_IMAGE_LIMITS[provider] ?? PROVIDER_IMAGE_LIMITS.default ?? 2048;
 }
@@ -455,6 +472,8 @@ export class PlaywrightService {
        * carries a null buffer and no tiles. Default true.
        */
       captureScreenshot?: boolean;
+      /** LLM provider the tiles are for; sizes them for that provider's image limits. */
+      llmProvider?: LlmProvider;
     },
   ): Promise<PageAnalysisResult> {
     const log = jobLogger || defaultLogger;
@@ -653,7 +672,7 @@ export class PlaywrightService {
             });
 
             // Split into tiles if needed to fit LLM provider limits (varies by provider)
-            const maxDimension = getMaxImageDimension(modelId);
+            const maxDimension = getMaxImageDimension(modelId, analyzeOptions?.llmProvider);
             const split = await splitImageIntoTiles(screenshotBuffer, maxDimension, log);
             screenshotTiles = split.tiles;
 

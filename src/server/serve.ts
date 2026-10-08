@@ -26,7 +26,14 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import { HTML_REPORT_CSP, renderHtmlReport } from '../engine/html-report.js';
-import { A11yHawkEngine, assertLlmBaseUrlAllowed, resolveLighthouseConfig, ScanError } from '../engine/scan.js';
+import {
+  A11yHawkEngine,
+  assertLlmBaseUrlAllowed,
+  LLM_EFFORTS,
+  LLM_PROVIDERS,
+  resolveLighthouseConfig,
+  ScanError,
+} from '../engine/scan.js';
 import type {
   EngineOptions,
   ScanLighthouseOptions,
@@ -37,7 +44,15 @@ import type {
 import { LIGHTHOUSE_CATEGORY_VALUES, type LighthouseCategory } from '../engine/lighthouse.js';
 import { createLogger } from '../logger/index.js';
 import type { Logger } from '../logger/index.js';
-import type { GenerationParams, ScanHeader, ScanHeaderType, WcagLevel, WcagVersion } from '../types.js';
+import type {
+  GenerationParams,
+  LlmEffort,
+  LlmProvider,
+  ScanHeader,
+  ScanHeaderType,
+  WcagLevel,
+  WcagVersion,
+} from '../types.js';
 
 /** Maximum accepted request body. Scan requests are tiny; anything larger is rejected. */
 const MAX_BODY_BYTES = 64 * 1024;
@@ -154,6 +169,12 @@ function sanitizeGenerationParams(raw: unknown): SanitizeResult<GenerationParams
     }
     out[key] = val;
   }
+  if (raw.effort !== undefined) {
+    if (typeof raw.effort !== 'string' || !LLM_EFFORTS.includes(raw.effort as LlmEffort)) {
+      return { ok: false, message: `llm.generationParams.effort must be one of: ${LLM_EFFORTS.join(', ')}.` };
+    }
+    out.effort = raw.effort as LlmEffort;
+  }
   return { ok: true, value: out };
 }
 
@@ -162,9 +183,16 @@ function sanitizeLlm(raw: unknown): SanitizeResult<ScanOptions['llm']> {
   if (typeof raw.apiKey !== 'string' || raw.apiKey.trim() === '') {
     return { ok: false, message: 'options.llm.apiKey must be a non-empty string.' };
   }
-  // Strict allowlist: only apiKey, model, baseUrl, generationParams are
-  // accepted. httpReferer/appTitle/debug and anything else are dropped.
+  // Strict allowlist: only apiKey, provider, model, baseUrl, generationParams are
+  // accepted. httpReferer/appTitle/debug/pricing/refusalFallback and anything else
+  // are dropped.
   const llm: NonNullable<ScanOptions['llm']> = { apiKey: raw.apiKey };
+  if (raw.provider !== undefined) {
+    if (typeof raw.provider !== 'string' || !LLM_PROVIDERS.includes(raw.provider as LlmProvider)) {
+      return { ok: false, message: `options.llm.provider must be one of: ${LLM_PROVIDERS.join(', ')}.` };
+    }
+    llm.provider = raw.provider as LlmProvider;
+  }
   if (raw.model !== undefined) {
     if (typeof raw.model !== 'string') return { ok: false, message: 'options.llm.model must be a string.' };
     llm.model = raw.model;

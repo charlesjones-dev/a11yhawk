@@ -43,4 +43,16 @@ describe('runDoctor', () => {
     // the key never changes readiness.
     expect(withKey.code).toBe(withoutKey.code);
   });
+
+  it('reports the LLM provider for information only', async () => {
+    const unset = await captureDoctor({});
+    expect(unset.output).toContain('LLM provider (A11YHAWK_PROVIDER): openrouter (default)');
+
+    const anthropic = await captureDoctor({ A11YHAWK_PROVIDER: 'anthropic' });
+    expect(anthropic.output).toContain('LLM provider (A11YHAWK_PROVIDER): anthropic');
+
+    const invalid = await captureDoctor({ A11YHAWK_PROVIDER: 'gemini' });
+    expect(invalid.output).toContain('"gemini" is not a provider');
+    expect(invalid.code).toBe(unset.code);
+  });
 });

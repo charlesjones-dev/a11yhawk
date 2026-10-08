@@ -27,7 +27,7 @@ It was extracted from the private `accesshawk-nuxt` monorepo's worker (expected 
 
 ## Architecture
 
-`src/engine/scan.ts` is the orchestrator. `A11yHawkEngine.scan()` runs: validate URL -> Playwright capture (`playwright.ts`: screenshot tiled to the LLM provider's image limits, CDP accessibility tree, HTML) -> Lighthouse audit (`lighthouse.ts`: subprocess, accessibility plus optional performance category, reuses the browser via CDP port) -> LLM analysis (`llm.ts` + `prompts.ts`: OpenAI SDK against any OpenAI-compatible endpoint, OpenRouter default) -> parse and recompute -> markdown (`markdown-generator.ts`) -> screenshot annotation (`annotator.ts`).
+`src/engine/scan.ts` is the orchestrator. `A11yHawkEngine.scan()` runs: validate URL -> Playwright capture (`playwright.ts`: screenshot tiled to the LLM provider's image limits, CDP accessibility tree, HTML) -> Lighthouse audit (`lighthouse.ts`: subprocess, accessibility plus optional performance category, reuses the browser via CDP port) -> LLM analysis (`llm.ts` + `prompts.ts`: two providers behind one internal interface, selected by `ScanLlmOptions.provider`: OpenRouter, the default, through the OpenAI SDK against any OpenAI-compatible endpoint, and Anthropic through `@anthropic-ai/sdk` against the Claude API) -> parse and recompute -> markdown (`markdown-generator.ts`) -> screenshot annotation (`annotator.ts`).
 
 Mode split: when `ScanOptions.llm` is present, Lighthouse failure is non-blocking (findings just enrich the prompt); when omitted (Lighthouse-only mode), Lighthouse is the sole analysis source and its failure is fatal, with `buildStructuredFromLighthouse` mapping severities (critical/serious/moderate/minor -> critical/high/medium/low). Annotation failure never fails a scan.
 
@@ -37,8 +37,8 @@ Options are split by lifetime: `EngineOptions` (browser posture: `allowPrivateNe
 
 ## Security invariants (do not weaken)
 
-- **The engine never reads `process.env`.** Env is read only in `src/cli/` (`A11YHAWK_*` fallbacks), `src/server/serve.ts` (`runServe` only), and the logger. Everything else takes explicit options.
-- **SSRF request guard** (`engine/request-guard.ts`): installed on the browser context, per-request DNS re-checks, redirect-hop detection, service workers blocked. In the default posture `installBrowserRequestGuard` also intercepts every request in the shared browser (browser-level CDP `Fetch`), which is what covers Lighthouse's own page. `allowPrivateNetworks` widens accepted addresses but never disables the rest. Refusal messages (`TargetVerdict.reason`, `validateUrl().error`) never name the resolved private address; it travels as `resolvedAddress`, for logs only. In server mode it is env-only; request bodies pass a strict allowlist that strips it (`sanitize*` in `serve.ts`), and submitted API keys are redacted from the job store and never echoed.
+- **The engine never reads `process.env`.** Env is read only in `src/cli/` (`A11YHAWK_*` fallbacks), `src/server/serve.ts` (`runServe` only), and the logger. Everything else takes explicit options. The Anthropic SDK reads `ANTHROPIC_*` variables on its own unless told otherwise, so `llm.ts` passes every client setting explicitly and `EnvIsolatedAnthropic` drops `ANTHROPIC_CUSTOM_HEADERS` (`llm.anthropic.test.ts` covers it).
+- **SSRF request guard** (`engine/request-guard.ts`): installed on the browser context, per-request DNS re-checks, redirect-hop detection, service workers blocked. In the default posture `installBrowserRequestGuard` also intercepts every request in the shared browser (browser-level CDP `Fetch`), which is what covers Lighthouse's own page. The LLM clients get the connection-time check through `createGuardedAgent` (OpenAI SDK) or `createGuardedFetch` (Anthropic SDK, which uses fetch). `allowPrivateNetworks` widens accepted addresses but never disables the rest. Refusal messages (`TargetVerdict.reason`, `validateUrl().error`) never name the resolved private address; it travels as `resolvedAddress`, for logs only. In server mode it is env-only; request bodies pass a strict allowlist that strips it (`sanitize*` in `serve.ts`), and submitted API keys are redacted from the job store and never echoed.
 - **Lighthouse subprocess** (`engine/lighthouse.ts`): always `shell: false` with argv arrays; the scan URL is attacker-controlled and must never reach a shell. The CLI path is resolved via `createRequire` from the installed `lighthouse` package, never a relative `node_modules/.bin` path (breaks under pnpm/npx and is a hijack risk). The child gets an allowlisted env (`buildLighthouseEnv`), never `process.env`, and `--no-enable-error-reporting` stays in its argv.
 - **LLM errors** (`engine/llm.ts`): messages are sanitized to strip API keys, and the raw provider error is deliberately NOT chained as `cause` (the `eslint-disable preserve-caught-error` comments there are intentional; do not "fix" them).
 - **HTML report** (`engine/html-report.ts`): every interpolated value goes through `escapeHtml`; scanned-page content is untrusted and must not be able to inject markup into its own report. The report must itself pass accessibility checks (WCAG AA contrast, landmarks, keyboard operability).
@@ -51,7 +51,7 @@ Changes to `request-guard.ts`, `url-validator.ts`, or the Lighthouse spawn get e
 
 - ESM-only, TypeScript strict with `noUncheckedIndexedAccess`, `NodeNext` resolution (imports use `.js` extensions). Tests are colocated `*.test.ts`; `tsconfig.build.json` keeps them out of `dist/`.
 - Branding: "A11yHawk" in prose, UI strings, and docs; lowercase `a11yhawk` for the package name, commands, URLs, and technical identifiers. The `a11yhawk:resolved:` localStorage key in the HTML report is a persistence contract; never rename it.
-- The default LLM model lives in `DEFAULT_MODEL` (`engine/scan.ts`).
+- The default LLM models live in `engine/scan.ts`: `DEFAULT_MODEL` (OpenRouter) and `DEFAULT_ANTHROPIC_MODEL` (Anthropic).
 
 ## Releases
 
@@ -100,15 +100,16 @@ Topic-specific knowledge is stored in `docs/kb/` and loaded contextually based o
 
 When a KB file's frontmatter contains `related: [[other-file]]` cross-references, also read the related file(s) for full context.
 
-| Topic                 | File                                     | When to Load                                                                          |
-| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security  |
-| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                       |
-| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                       |
-| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                       |
-| Lighthouse Engine     | docs/kb/engine/lighthouse.md             | `src/engine/lighthouse.ts`, `src/engine/scan.ts` — lighthouse, performance, bulk-mode |
-| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning        |
-| Vitest                | docs/kb/tools/vitest.md                  | `**/*.test.ts`, `vitest.config.ts` — testing, vitest, soak                            |
+| Topic                 | File                                     | When to Load                                                                                                                   |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security, versioning                               |
+| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                                                                |
+| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                                                                |
+| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                                                                |
+| Lighthouse Engine     | docs/kb/engine/lighthouse.md             | `src/engine/lighthouse.ts`, `src/engine/scan.ts` — lighthouse, performance, bulk-mode                                          |
+| LLM Providers         | docs/kb/engine/llm-providers.md          | `src/engine/llm.ts`, `src/engine/llm*.test.ts`, `src/engine/request-guard.ts` — llm, anthropic, openrouter, sdk, ssrf, pricing |
+| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning                                                 |
+| Vitest                | docs/kb/tools/vitest.md                  | `**/*.test.ts`, `vitest.config.ts` — testing, vitest, soak                                                                     |
 
 <!-- kb-auto: enabled -->
 

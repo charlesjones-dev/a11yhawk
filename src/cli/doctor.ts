@@ -3,8 +3,8 @@
  *
  * Verifies the pieces a scan needs before the user hits a mid-scan failure:
  * a supported Node.js, a usable Playwright Chromium, and a resolvable
- * Lighthouse CLI. The API key is reported for information only: Lighthouse-only
- * mode needs no key, so a missing key is never a failure.
+ * Lighthouse CLI. The API key and LLM provider are reported for information only:
+ * Lighthouse-only mode needs neither, so neither is ever a failure.
  *
  * Exit code is the contract the CLI relies on: 0 when a scan can run at all
  * (Lighthouse-only counts), 3 when it cannot.
@@ -13,6 +13,9 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 import { chromium } from 'playwright';
+
+import { LLM_PROVIDERS } from '../engine/scan.js';
+import type { LlmProvider } from '../types.js';
 
 const EXIT_OK = 0;
 const EXIT_CONFIG = 3;
@@ -123,12 +126,29 @@ function checkApiKey(env: NodeJS.ProcessEnv): DoctorCheck {
 }
 
 /**
+ * The provider LLM scans will use. Informational like the key: an invalid value only
+ * matters once a key turns LLM mode on, and the scan then fails with a configuration error.
+ */
+function checkProvider(env: NodeJS.ProcessEnv): DoctorCheck {
+  const value = env.A11YHAWK_PROVIDER?.trim();
+  let detail: string;
+  if (!value) {
+    detail = 'openrouter (default)';
+  } else if (LLM_PROVIDERS.includes(value as LlmProvider)) {
+    detail = value;
+  } else {
+    detail = `"${value}" is not a provider (use ${LLM_PROVIDERS.join(' or ')}); LLM scans will fail`;
+  }
+  return { name: 'LLM provider (A11YHAWK_PROVIDER)', ok: true, informational: true, detail };
+}
+
+/**
  * Run every check, print a report to stdout, and return the process exit code.
  * A scan can run when Node, Chromium, and Lighthouse are all healthy, which is
  * exactly the Lighthouse-only path.
  */
 export async function runDoctor(env: NodeJS.ProcessEnv = process.env): Promise<number> {
-  const checks: DoctorCheck[] = [checkNode(), checkChromium(), checkLighthouse(), checkApiKey(env)];
+  const checks: DoctorCheck[] = [checkNode(), checkChromium(), checkLighthouse(), checkApiKey(env), checkProvider(env)];
 
   const lines: string[] = ['a11yhawk doctor', ''];
   for (const check of checks) {

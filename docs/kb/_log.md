@@ -1,7 +1,7 @@
 ---
 tags: [log, meta]
 created: 2026-07-20
-last-updated: 2026-07-20
+last-updated: 2026-10-08
 ---
 
 # Knowledge Base Log
@@ -28,3 +28,8 @@ Chronological record of KB operations. Append-only — newest entries at the bot
 - Created: `engine/lighthouse.md`, `tools/vitest.md`
 - Updated: `_index.md`, CLAUDE.md KB table
 - Global learnings: 0 added (both learnings are scoped, not cross-cutting)
+
+## [2026-10-08] learn | v0.7.0 Anthropic provider session learnings captured
+- Created: `engine/llm-providers.md`
+- Updated: `tools/dependency-audit.md` (3 rules, cross-ref), `tools/vitest.md` (cross-ref), `_global-learnings.md` (2 rules), `_index.md`, CLAUDE.md KB table
+- Global learnings: 2 added (no `timeout` on macOS; non-interactive partial staging and isolated verification)

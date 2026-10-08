@@ -354,6 +354,47 @@ describe('createA11yHawkServer', () => {
     expect(options?.screenshot).toBe(false);
   });
 
+  it('passes llm.provider and generationParams.effort through, and strips pricing and refusalFallback', async () => {
+    const { base, fake } = await startServer(successScan);
+
+    const created = await postScan(base, {
+      url: 'https://example.com',
+      options: {
+        llm: {
+          apiKey: 'sk-ant-key',
+          provider: 'anthropic',
+          generationParams: { effort: 'high', maxTokens: 32000 },
+          pricing: { 'claude-opus-5-5': { inputPer1M: 0, outputPer1M: 0 } },
+          refusalFallback: false,
+        },
+      },
+    });
+    expect(created.status).toBe(202);
+    const { id } = (await created.json()) as { id: string };
+    await pollUntil(base, id, (j) => j.status === 'completed');
+
+    expect(fake.scanCalls[0]?.options.llm).toEqual({
+      apiKey: 'sk-ant-key',
+      provider: 'anthropic',
+      generationParams: { effort: 'high', maxTokens: 32000 },
+    });
+  });
+
+  it('rejects an unknown llm.provider or effort with 400', async () => {
+    const { base } = await startServer(successScan);
+    const url = 'https://example.com';
+
+    const cases: unknown[] = [
+      { llm: { apiKey: 'k', provider: 'gemini' } },
+      { llm: { apiKey: 'k', provider: 1 } },
+      { llm: { apiKey: 'k', generationParams: { effort: 'extreme' } } },
+    ];
+    for (const options of cases) {
+      const res = await postScan(base, { url, options });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it('rejects invalid lighthouse and screenshot options with 400', async () => {
     const { base } = await startServer(successScan);
     const url = 'https://example.com';

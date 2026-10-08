@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { renderHtmlReport } from '../engine/html-report.js';
-import { scan, ScanError } from '../engine/scan.js';
+import { LLM_PROVIDERS, scan, ScanError } from '../engine/scan.js';
 import type {
   OneShotScanOptions,
   ScanErrorCode,
@@ -33,7 +33,7 @@ import type {
 } from '../engine/scan.js';
 import { sanitize, sanitizeString, type LogContext, type Logger, type LogLevel } from '../logger/index.js';
 import { runServe } from '../server/serve.js';
-import type { ScanHeader, WcagLevel, WcagVersion } from '../types.js';
+import type { LlmProvider, ScanHeader, WcagLevel, WcagVersion } from '../types.js';
 import { runDoctor } from './doctor.js';
 
 export const EXIT_SUCCESS = 0;
@@ -54,6 +54,7 @@ const VALID_FORMATS: readonly OutputFormat[] = ['json', 'md', 'html'];
 
 /** Raw, validated scan flags before env fallback is applied. */
 export interface ParsedScanFlags {
+  provider?: LlmProvider;
   model?: string;
   apiKey?: string;
   baseUrl?: string;
@@ -99,6 +100,7 @@ export interface BuiltCli {
 }
 
 const SCAN_ARG_OPTIONS = {
+  provider: { type: 'string' },
   model: { type: 'string' },
   'api-key': { type: 'string' },
   'base-url': { type: 'string' },
@@ -159,6 +161,9 @@ export function parseCliArgs(argv: string[]): ParsedCli {
   if (values.help === true) return { command: 'help' };
   if (values.version === true) return { command: 'version' };
 
+  const rawProvider = values.provider as string | undefined;
+  const provider =
+    rawProvider === undefined ? undefined : validateEnum('--provider', rawProvider, LLM_PROVIDERS, 'openrouter');
   const wcag = validateEnum('--wcag', values.wcag as string | undefined, ['2.0', '2.1', '2.2'] as const, '2.1');
   const level = validateEnum('--level', values.level as string | undefined, ['A', 'AA', 'AAA'] as const, 'AA');
 
@@ -175,6 +180,7 @@ export function parseCliArgs(argv: string[]): ParsedCli {
   }
 
   const flags: ParsedScanFlags = {
+    provider,
     model: values.model as string | undefined,
     apiKey: values['api-key'] as string | undefined,
     baseUrl: values['base-url'] as string | undefined,
@@ -270,6 +276,13 @@ export function buildScanOptions(flags: ParsedScanFlags, env: NodeJS.ProcessEnv)
 
   const llmMode = apiKey !== undefined && !flags.noLlm;
   const runLighthouse = !flags.noLighthouse;
+  // The env value is checked only in LLM mode, the only mode that uses it.
+  const envProvider = firstNonEmpty(env.A11YHAWK_PROVIDER)?.trim();
+  const provider =
+    flags.provider ??
+    (llmMode && envProvider !== undefined
+      ? validateEnum('A11YHAWK_PROVIDER', envProvider, LLM_PROVIDERS, 'openrouter')
+      : undefined);
 
   if (!llmMode && !runLighthouse) {
     throw new CliConfigError(
@@ -302,6 +315,7 @@ export function buildScanOptions(flags: ParsedScanFlags, env: NodeJS.ProcessEnv)
 
   if (llmMode && apiKey !== undefined) {
     const llm: ScanLlmOptions = { apiKey };
+    if (provider !== undefined) llm.provider = provider;
     if (model !== undefined) llm.model = model;
     if (baseUrl !== undefined) llm.baseUrl = baseUrl;
     if (flags.verbose) llm.debug = true;
@@ -333,7 +347,9 @@ export const EXIT_FOR_SCAN_ERROR: Record<ScanErrorCode, number> = {
   'capture-failed': EXIT_SCAN_ERROR,
   'lighthouse-failed': EXIT_SCAN_ERROR,
   'llm-auth': EXIT_SCAN_ERROR,
+  'llm-billing': EXIT_SCAN_ERROR,
   'llm-rate-limit': EXIT_SCAN_ERROR,
+  'llm-refused': EXIT_SCAN_ERROR,
   'llm-failed': EXIT_SCAN_ERROR,
   'llm-malformed': EXIT_SCAN_ERROR,
 };
@@ -511,9 +527,12 @@ Usage:
   a11yhawk --version           Print the version
 
 Scan options:
-  --model <id>            LLM model id (env: A11YHAWK_MODEL)
-  --api-key <key>         LLM API key (env: A11YHAWK_API_KEY)
-  --base-url <url>        OpenAI-compatible endpoint (env: A11YHAWK_BASE_URL)
+  --provider <name>       LLM provider: openrouter (default; any OpenAI-compatible
+                          endpoint) or anthropic (env: A11YHAWK_PROVIDER)
+  --model <id>            LLM model id; default depends on the provider (env: A11YHAWK_MODEL)
+  --api-key <key>         API key for the provider (env: A11YHAWK_API_KEY)
+  --base-url <url>        Provider endpoint; defaults to OpenRouter or the Claude API
+                          (env: A11YHAWK_BASE_URL)
   --no-llm                Lighthouse-only mode (no LLM analysis)
   --wcag <2.0|2.1|2.2>    WCAG version (default: 2.1)
   --level <A|AA|AAA>      Conformance level (default: AA)

@@ -88,6 +88,12 @@ describe('parseCliArgs flag parsing', () => {
     expect(() => parseCliArgs(['https://example.com', '--wcag', '9.9'])).toThrow(/Invalid value for --wcag/);
   });
 
+  it('validates --provider against the allowed set', () => {
+    expect(flagsFor(['https://example.com', '--provider', 'anthropic']).provider).toBe('anthropic');
+    expect(flagsFor(['https://example.com']).provider).toBeUndefined();
+    expect(() => parseCliArgs(['https://example.com', '--provider', 'gemini'])).toThrow(/Invalid value for --provider/);
+  });
+
   it('validates --level against the allowed set', () => {
     expect(flagsFor(['https://example.com', '--level', 'AAA']).level).toBe('AAA');
     expect(() => parseCliArgs(['https://example.com', '--level', 'B'])).toThrow(/Invalid value for --level/);
@@ -156,6 +162,33 @@ describe('buildScanOptions env fallback and precedence', () => {
     expect(scanOptions.llm?.apiKey).toBe('envkey');
     expect(scanOptions.llm?.model).toBe('env/model');
     expect(scanOptions.llm?.baseUrl).toBe('https://env.example/v1');
+  });
+
+  it('takes the provider from --provider or A11YHAWK_PROVIDER, the flag winning', () => {
+    const fromEnv = buildScanOptions(flagsFor(['https://example.com']), {
+      A11YHAWK_API_KEY: 'envkey',
+      A11YHAWK_PROVIDER: 'anthropic',
+    });
+    expect(fromEnv.scanOptions.llm?.provider).toBe('anthropic');
+
+    const fromFlag = buildScanOptions(flagsFor(['https://example.com', '--provider', 'openrouter']), {
+      A11YHAWK_API_KEY: 'envkey',
+      A11YHAWK_PROVIDER: 'anthropic',
+    });
+    expect(fromFlag.scanOptions.llm?.provider).toBe('openrouter');
+  });
+
+  it('leaves llm.provider unset when no provider is given', () => {
+    const { scanOptions } = buildScanOptions(flagsFor(['https://example.com']), { A11YHAWK_API_KEY: 'envkey' });
+    expect(scanOptions.llm).not.toHaveProperty('provider');
+  });
+
+  it('rejects an invalid A11YHAWK_PROVIDER only when LLM mode would use it', () => {
+    const env = { A11YHAWK_PROVIDER: 'gemini' };
+    expect(() => buildScanOptions(flagsFor(['https://example.com']), { ...env, A11YHAWK_API_KEY: 'k' })).toThrow(
+      /Invalid value for A11YHAWK_PROVIDER/,
+    );
+    expect(buildScanOptions(flagsFor(['https://example.com']), env).scanOptions.llm).toBeUndefined();
   });
 
   it('runs Lighthouse-only when no key is present anywhere', () => {
@@ -261,7 +294,9 @@ describe('exitCodeForScanError', () => {
     'capture-failed',
     'lighthouse-failed',
     'llm-auth',
+    'llm-billing',
     'llm-rate-limit',
+    'llm-refused',
     'llm-failed',
     'llm-malformed',
   ];
