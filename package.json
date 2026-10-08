@@ -1,6 +1,6 @@
 {
   "name": "a11yhawk",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Open-source, self-hostable web accessibility scan engine: Playwright capture, Lighthouse audits, and BYOK LLM analysis producing structured WCAG reports.",
   "keywords": [
     "accessibility",

@@ -158,9 +158,12 @@ export function sanitizeHtml(html: string): string {
   result = result.replace(/(?<!\s)\s+sizes="[^"]*"/gi, '');
   result = result.replace(/(?<!\s)\s+sizes='[^']*'/gi, '');
 
-  // Remove empty attributes (nonce="", async="", defer="", etc.)
-  result = result.replace(/(?<!\s)\s+\w+=""/g, '');
-  result = result.replace(/(?<!\s)\s+\w+=''/g, '');
+  // Remove empty attributes (nonce="", async="", defer="", etc.), except ones whose empty
+  // value carries meaning: alt="" marks a decorative image, and page.content() serializes
+  // boolean attributes such as disabled as disabled=""
+  const keepEmpty = `(?!(?:${EMPTY_ATTRS_TO_KEEP.join('|')})=)`;
+  result = result.replace(new RegExp(`(?<!\\s)\\s+${keepEmpty}\\w+=""`, 'gi'), '');
+  result = result.replace(new RegExp(`(?<!\\s)\\s+${keepEmpty}\\w+=''`, 'gi'), '');
 
   // Collapse multiple whitespace/newlines into single space
   result = result.replace(/\s{2,}/g, ' ');
@@ -172,10 +175,26 @@ export function sanitizeHtml(html: string): string {
   result = result.trim();
 
   // Apply prompt injection escaping as final step
-  result = escapeForPromptInternal(result);
+  result = escapeForPrompt(result);
 
   return result;
 }
+
+/** Empty-valued attributes sanitizeHtml keeps because the accessibility analysis needs them. */
+const EMPTY_ATTRS_TO_KEEP = [
+  'alt',
+  'disabled',
+  'required',
+  'readonly',
+  'hidden',
+  'inert',
+  'checked',
+  'selected',
+  'open',
+  'autoplay',
+  'controls',
+  'muted',
+];
 
 /** Replacer for `...(?:(terminator)|$)` patterns: drop terminated matches, keep the rest as-is. */
 function keepUnterminated(match: string, terminator: string | undefined): string {
@@ -189,15 +208,6 @@ function keepUnterminated(match: string, terminator: string | undefined): string
 function removeElements(html: string, tag: string, replacement = ''): string {
   const pattern = new RegExp(`<${tag}\\b[^>]*(?:>[\\s\\S]*?(?:(<\\/${tag}>)|$)|$)`, 'gi');
   return html.replace(pattern, (match, closingTag: string | undefined) => (closingTag ? replacement : match));
-}
-
-/**
- * Internal escaping function (forward declaration for use in sanitizeHtml).
- * The full escapeForPrompt is defined below with marker escaping.
- */
-function escapeForPromptInternal(content: string): string {
-  // Escape triple backticks to prevent breaking out of markdown code blocks
-  return content.replace(/```/g, '\\`\\`\\`');
 }
 
 // ============================================================================
@@ -386,8 +396,8 @@ export function a11yTreeToCompactJson(tree: A11yNode | null): string {
     if (typeof value === 'string') {
       const trimmed = value.trim();
       if (trimmed === '') return undefined;
-      // Escape triple backticks in string values
-      return escapeForPromptInternal(trimmed);
+      // Escape triple backticks and boundary markers in string values
+      return escapeForPrompt(trimmed);
     }
     return value;
   });

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeHtml, sanitizeA11yTree, a11yTreeToCompactJson, estimateTokens } from './sanitizers.js';
+import {
+  sanitizeHtml,
+  sanitizeA11yTree,
+  a11yTreeToCompactJson,
+  estimateTokens,
+  CONTENT_MARKERS,
+} from './sanitizers.js';
 
 describe('sanitizeHtml', () => {
   it('removes script tags and contents', () => {
@@ -344,5 +350,36 @@ describe('integration: token reduction', () => {
 
     // Should be significantly smaller
     expect(sanitized.length).toBeLessThan(html.length * 0.5);
+  });
+});
+
+describe('sanitizeHtml empty attributes with meaning', () => {
+  it('keeps alt="" and serialized boolean attributes', () => {
+    const result = sanitizeHtml(
+      '<img src="a.png" alt=""><button disabled="">Go</button><input required="" readonly="" nonce="">',
+    );
+    expect(result).toContain('alt=""');
+    expect(result).toContain('disabled=""');
+    expect(result).toContain('required=""');
+    expect(result).toContain('readonly=""');
+    expect(result).not.toContain('nonce=""');
+  });
+});
+
+describe('content boundary markers in page content', () => {
+  const spoof = Object.values(CONTENT_MARKERS).join(' ');
+
+  it('escapes markers in sanitized HTML, including attribute values', () => {
+    const result = sanitizeHtml(`<img src="a.png" alt="${spoof}"><xmp>${spoof}</xmp>`);
+    for (const marker of Object.values(CONTENT_MARKERS)) {
+      expect(result).not.toContain(marker);
+    }
+  });
+
+  it('escapes markers in accessibility tree strings', () => {
+    const result = a11yTreeToCompactJson({ role: 'document', children: [{ role: 'button', name: spoof }] });
+    for (const marker of Object.values(CONTENT_MARKERS)) {
+      expect(result).not.toContain(marker);
+    }
   });
 });
