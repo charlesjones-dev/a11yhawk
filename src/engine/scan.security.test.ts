@@ -241,6 +241,21 @@ describe('model output is not trusted', () => {
     expect(() => renderHtmlReport(report)).not.toThrow();
   });
 
+  it('keeps only typed metadata fields', async () => {
+    const report = await runScan(
+      modelOutput({
+        metadata: { pageTitle: { text: 'Home' }, engineMode: 'lighthouse-only', scanDuration: 'x', userAgent: 'UA' },
+      }),
+    );
+    expect(report.structured.metadata).toEqual({ userAgent: 'UA' });
+    expect(() => renderHtmlReport(report)).not.toThrow();
+  });
+
+  it('keeps a string page title', async () => {
+    const report = await runScan(modelOutput({ metadata: { pageTitle: 'Home', scanDuration: 12 } }));
+    expect(report.structured.metadata).toEqual({ pageTitle: 'Home', scanDuration: 12 });
+  });
+
   it('keeps the scanned URL as structured.url rather than the model-supplied one', async () => {
     const report = await runScan(modelOutput({ url: 'https://attacker.test/phish' }));
     expect(report.structured.url).toBe(SCAN_URL);

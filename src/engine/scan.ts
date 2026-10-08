@@ -270,6 +270,19 @@ function normalizeCoverage(value: unknown): WCAGCoverage[] {
   });
 }
 
+/**
+ * Metadata from model output: only the typed fields, each kept when it has the right type.
+ * Anything else is dropped, including `engineMode`, which is the engine's to set.
+ */
+function normalizeMetadata(value: Record<string, unknown>): NonNullable<StructuredScanOutput['metadata']> {
+  const { pageTitle, scanDuration, userAgent } = value;
+  return {
+    ...(typeof pageTitle === 'string' ? { pageTitle } : {}),
+    ...(typeof scanDuration === 'number' && Number.isFinite(scanDuration) ? { scanDuration } : {}),
+    ...(typeof userAgent === 'string' ? { userAgent } : {}),
+  };
+}
+
 /** Passed-check entries from model output. */
 function normalizePassedChecks(value: unknown): PassedCheck[] {
   if (!Array.isArray(value)) return [];
@@ -837,7 +850,7 @@ export class A11yHawkEngine {
         wcagCoverage,
         issues,
         passedChecks: normalizePassedChecks(raw.passedChecks),
-        ...(isRecord(raw.metadata) ? { metadata: raw.metadata } : {}),
+        ...(isRecord(raw.metadata) ? { metadata: normalizeMetadata(raw.metadata) } : {}),
       };
 
       // Lighthouse criteria for cross-referencing with AI findings.
