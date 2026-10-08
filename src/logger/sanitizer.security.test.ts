@@ -64,6 +64,21 @@ describe('URL credentials in logs', () => {
     );
   });
 
+  it('masks the whole value when it contains a semicolon or a second #', () => {
+    expect(sanitizeString('https://example.com/?token=abc;def&page=2')).toBe(
+      `https://example.com/?token=${MASK}&page=2`,
+    );
+    expect(sanitizeString('https://example.com/cb#access_token=ab#cd&state=s')).toBe(
+      `https://example.com/cb#access_token=${MASK}&state=s`,
+    );
+  });
+
+  it('masks session ids in path parameters', () => {
+    expect(sanitizeString('https://example.com/app;jsessionid=ABC123?page=2')).toBe(
+      `https://example.com/app;jsessionid=${MASK}?page=2`,
+    );
+  });
+
   it('leaves URLs without credentials unchanged', () => {
     const url = 'https://example.com/products;color=red?page=2&sort=asc#top';
     expect(sanitizeString(url)).toBe(url);

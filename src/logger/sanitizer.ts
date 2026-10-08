@@ -148,16 +148,31 @@ function isSensitiveParam(name: string): boolean {
   return SENSITIVE_PARAM.test(decoded.replace(/[^a-z0-9]/gi, ''));
 }
 
+/** Mask the values of credential-like parameters in one URL section. */
+function maskParams(section: string, pattern: RegExp): string {
+  return section.replace(pattern, (match, separator: string, name: string, value: string) =>
+    value !== '' && isSensitiveParam(name) ? `${separator}${name}=${MASK}` : match,
+  );
+}
+
 /**
  * Mask a URL's userinfo (everything up to the last `@` before the path) and the values of
- * credential-like query and fragment parameters (OAuth puts tokens in the fragment).
+ * credential-like parameters. Each section splits parameters the way URL parsing does, so
+ * a value is masked whole: query and fragment parameters end only at `&` (a `;` or a later
+ * `#` stays inside the value; OAuth puts tokens in the fragment), and path parameters such
+ * as `;jsessionid=` end at `;` or `/`.
  */
 function maskUrlCredentials(url: string): string {
-  return url
-    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, `$1${MASK}@`)
-    .replace(/([?&;#])([^=&;#]*)=([^&;#]*)/g, (match, separator: string, name: string, value: string) =>
-      value !== '' && isSensitiveParam(name) ? `${separator}${name}=${MASK}` : match,
-    );
+  const masked = url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, `$1${MASK}@`);
+  const hash = masked.indexOf('#');
+  const beforeHash = hash === -1 ? masked : masked.slice(0, hash);
+  const query = beforeHash.indexOf('?');
+  const path = query === -1 ? beforeHash : beforeHash.slice(0, query);
+  return (
+    maskParams(path, /(;)([^=;/]*)=([^;/]*)/g) +
+    maskParams(query === -1 ? '' : beforeHash.slice(query), /([?&])([^=&]*)=([^&]*)/g) +
+    maskParams(hash === -1 ? '' : masked.slice(hash), /([#&])([^=&]*)=([^&]*)/g)
+  );
 }
 
 /**
