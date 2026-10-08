@@ -100,15 +100,16 @@ Topic-specific knowledge is stored in `docs/kb/` and loaded contextually based o
 
 When a KB file's frontmatter contains `related: [[other-file]]` cross-references, also read the related file(s) for full context.
 
-| Topic                 | File                                     | When to Load                                                                          |
-| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security  |
-| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                       |
-| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                       |
-| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                       |
-| Lighthouse Engine     | docs/kb/engine/lighthouse.md             | `src/engine/lighthouse.ts`, `src/engine/scan.ts` — lighthouse, performance, bulk-mode |
-| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning        |
-| Vitest                | docs/kb/tools/vitest.md                  | `**/*.test.ts`, `vitest.config.ts` — testing, vitest, soak                            |
+| Topic                 | File                                     | When to Load                                                                                                                   |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security, versioning                               |
+| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                                                                |
+| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                                                                |
+| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                                                                |
+| Lighthouse Engine     | docs/kb/engine/lighthouse.md             | `src/engine/lighthouse.ts`, `src/engine/scan.ts` — lighthouse, performance, bulk-mode                                          |
+| LLM Providers         | docs/kb/engine/llm-providers.md          | `src/engine/llm.ts`, `src/engine/llm*.test.ts`, `src/engine/request-guard.ts` — llm, anthropic, openrouter, sdk, ssrf, pricing |
+| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning                                                 |
+| Vitest                | docs/kb/tools/vitest.md                  | `**/*.test.ts`, `vitest.config.ts` — testing, vitest, soak                                                                     |
 
 <!-- kb-auto: enabled -->
 
