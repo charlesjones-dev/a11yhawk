@@ -20,42 +20,50 @@
  * - Excessive whitespace
  */
 export function sanitizeHtml(html: string): string {
+  // Every pattern here must stay linear in the input: page.content() is unbounded and
+  // page-controlled, and this runs on the host's event loop. Two rules keep it that way:
+  // - Attribute patterns start with (?<!\s)\s+ so a whitespace run is scanned once from
+  //   its start, not once per position inside it (quadratic on long runs).
+  // - Patterns that scan to a terminator (</script>, -->, >) also stop at end of input
+  //   (`|$`), and the replacer keeps an unterminated match unchanged. Without that, every
+  //   opener lacking a terminator rescans to the end (an <xmp> of `<script>` text is
+  //   quadratic); unterminated openers were left as-is before too, so output is the same.
   let result = html;
 
   // Remove <script> tags and their contents (including inline scripts)
-  result = result.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  result = removeElements(result, 'script');
 
   // Remove <style> tags and their contents
-  result = result.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  result = removeElements(result, 'style');
 
   // Remove <noscript> tags and their contents
-  result = result.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
+  result = removeElements(result, 'noscript');
 
   // Extract and preserve <title> before removing <head>
-  const titleMatch = result.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const titleTag = titleMatch ? `<title>${titleMatch[1]}</title>` : '';
+  const titleMatch = /<title[^>]*(?:>([\s\S]*?)(?:(<\/title>)|$)|$)/i.exec(result);
+  const titleTag = titleMatch?.[2] ? `<title>${titleMatch[1]}</title>` : '';
 
   // Remove entire <head> section (scripts, styles, meta, links, etc. - only title matters for a11y)
   // Keep the opening <html> tag with lang attribute, replace head contents with just title
-  result = result.replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, `<head>${titleTag}</head>`);
+  result = removeElements(result, 'head', `<head>${titleTag}</head>`);
 
   // Remove <link> tags that may appear in body (lazy-loaded stylesheets, etc.)
-  result = result.replace(/<link\b[^>]*>/gi, '');
+  result = result.replace(/<link\b[^>]*(?:(>)|$)/gi, keepUnterminated);
 
   // Remove <meta> tags that may appear outside <head> (or in malformed HTML)
-  result = result.replace(/<meta\b[^>]*>/gi, '');
+  result = result.replace(/<meta\b[^>]*(?:(>)|$)/gi, keepUnterminated);
 
   // Remove HTML comments
-  result = result.replace(/<!--[\s\S]*?-->/g, '');
+  result = result.replace(/<!--[\s\S]*?(?:(-->)|$)/g, keepUnterminated);
 
   // Remove SVG path data (d="...") - keeps the element structure
   // This can save significant tokens on icon-heavy pages
-  result = result.replace(/\s+d="[^"]*"/gi, '');
-  result = result.replace(/\s+d='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+d="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+d='[^']*'/gi, '');
 
   // Remove SVG points attribute (for polygons/polylines)
-  result = result.replace(/\s+points="[^"]*"/gi, '');
-  result = result.replace(/\s+points='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+points="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+points='[^']*'/gi, '');
 
   // Remove SVG visual attributes (not needed - visual analysis from screenshot)
   const svgVisualAttrs = [
@@ -71,8 +79,8 @@ export function sanitizeHtml(html: string): string {
     'mask',
   ];
   for (const attr of svgVisualAttrs) {
-    result = result.replace(new RegExp(`\\s+${attr}="[^"]*"`, 'gi'), '');
-    result = result.replace(new RegExp(`\\s+${attr}='[^']*'`, 'gi'), '');
+    result = result.replace(new RegExp(`(?<!\\s)\\s+${attr}="[^"]*"`, 'gi'), '');
+    result = result.replace(new RegExp(`(?<!\\s)\\s+${attr}='[^']*'`, 'gi'), '');
   }
 
   // Remove inline event handlers
@@ -123,36 +131,36 @@ export function sanitizeHtml(html: string): string {
   ];
   for (const handler of eventHandlers) {
     // Match handler="..." or handler='...' (handles multi-line values)
-    const regex = new RegExp(`\\s+${handler}="[^"]*"`, 'gi');
+    const regex = new RegExp(`(?<!\\s)\\s+${handler}="[^"]*"`, 'gi');
     result = result.replace(regex, '');
-    const regexSingle = new RegExp(`\\s+${handler}='[^']*'`, 'gi');
+    const regexSingle = new RegExp(`(?<!\\s)\\s+${handler}='[^']*'`, 'gi');
     result = result.replace(regexSingle, '');
   }
 
   // Remove data-* attributes except data-testid
   // Matches data-anything="value" but not data-testid
-  result = result.replace(/\s+data-(?!testid)[a-z0-9-]+="[^"]*"/gi, '');
-  result = result.replace(/\s+data-(?!testid)[a-z0-9-]+='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+data-(?!testid)[a-z0-9-]+="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+data-(?!testid)[a-z0-9-]+='[^']*'/gi, '');
 
   // Remove inline styles (visual info comes from screenshot)
-  result = result.replace(/\s+style="[^"]*"/gi, '');
-  result = result.replace(/\s+style='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+style="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+style='[^']*'/gi, '');
 
   // Remove class attributes (visual info comes from screenshot, semantic info from a11y tree)
-  result = result.replace(/\s+class="[^"]*"/gi, '');
-  result = result.replace(/\s+class='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+class="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+class='[^']*'/gi, '');
 
   // Remove srcset (src is enough for alt text analysis)
-  result = result.replace(/\s+srcset="[^"]*"/gi, '');
-  result = result.replace(/\s+srcset='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+srcset="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+srcset='[^']*'/gi, '');
 
   // Remove sizes attribute (layout info not needed)
-  result = result.replace(/\s+sizes="[^"]*"/gi, '');
-  result = result.replace(/\s+sizes='[^']*'/gi, '');
+  result = result.replace(/(?<!\s)\s+sizes="[^"]*"/gi, '');
+  result = result.replace(/(?<!\s)\s+sizes='[^']*'/gi, '');
 
   // Remove empty attributes (nonce="", async="", defer="", etc.)
-  result = result.replace(/\s+\w+=""/g, '');
-  result = result.replace(/\s+\w+=''/g, '');
+  result = result.replace(/(?<!\s)\s+\w+=""/g, '');
+  result = result.replace(/(?<!\s)\s+\w+=''/g, '');
 
   // Collapse multiple whitespace/newlines into single space
   result = result.replace(/\s{2,}/g, ' ');
@@ -167,6 +175,20 @@ export function sanitizeHtml(html: string): string {
   result = escapeForPromptInternal(result);
 
   return result;
+}
+
+/** Replacer for `...(?:(terminator)|$)` patterns: drop terminated matches, keep the rest as-is. */
+function keepUnterminated(match: string, terminator: string | undefined): string {
+  return terminator ? '' : match;
+}
+
+/**
+ * Replace every `<tag ...>...</tag>` element in one linear pass (see the note at the top
+ * of sanitizeHtml). An element missing its `>` or closing tag is left unchanged.
+ */
+function removeElements(html: string, tag: string, replacement = ''): string {
+  const pattern = new RegExp(`<${tag}\\b[^>]*(?:>[\\s\\S]*?(?:(<\\/${tag}>)|$)|$)`, 'gi');
+  return html.replace(pattern, (match, closingTag: string | undefined) => (closingTag ? replacement : match));
 }
 
 /**

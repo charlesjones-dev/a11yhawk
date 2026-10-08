@@ -16,6 +16,7 @@
  *   operability, verified contrast, reduced-motion support). Color pairs in the
  *   dark theme were checked against 4.5:1 (body) and 3:1 (large/graphic).
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import type { AccessibilityIssue, PassedCheck, StructuredScanOutput, WCAGCoverage } from '../types.js';
@@ -433,8 +434,8 @@ function renderFooter(report: ScanReport, version: string): string {
   const usage = report.usage;
   if (usage) {
     stats.push(
-      `<div class="fstat"><span class="fstat-label">Tokens (in / out)</span><span class="fstat-val mono">${usage.promptTokens.toLocaleString('en-US')} / ${usage.completionTokens.toLocaleString('en-US')}</span></div>`,
-      `<div class="fstat"><span class="fstat-label">Total tokens</span><span class="fstat-val mono">${usage.totalTokens.toLocaleString('en-US')}</span></div>`,
+      `<div class="fstat"><span class="fstat-label">Tokens (in / out)</span><span class="fstat-val mono">${escapeHtml(usage.promptTokens.toLocaleString('en-US'))} / ${escapeHtml(usage.completionTokens.toLocaleString('en-US'))}</span></div>`,
+      `<div class="fstat"><span class="fstat-label">Total tokens</span><span class="fstat-val mono">${escapeHtml(usage.totalTokens.toLocaleString('en-US'))}</span></div>`,
       `<div class="fstat"><span class="fstat-label">Estimated cost</span><span class="fstat-val mono">${escapeHtml(formatCost(usage.cost))}</span></div>`,
     );
   }
@@ -806,3 +807,17 @@ const SCRIPT = `
   }
 })();
 `;
+
+/**
+ * Content-Security-Policy for serving the report over HTTP. The report needs only its own
+ * inline style, its one inline script (allowed by hash, so no other script can run), and
+ * data: images; everything else is denied.
+ */
+export const HTML_REPORT_CSP = [
+  "default-src 'none'",
+  'img-src data:',
+  "style-src 'unsafe-inline'",
+  `script-src 'sha256-${createHash('sha256').update(SCRIPT).digest('base64')}'`,
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');

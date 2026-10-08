@@ -6,6 +6,7 @@ import type {
 } from 'openai/resources/chat/completions';
 import type { Logger } from '../logger/index.js';
 import { createLogger } from '../logger/index.js';
+import { createGuardedAgent } from './request-guard.js';
 
 const defaultLogger = createLogger();
 
@@ -77,6 +78,11 @@ function sanitizeErrorMessage(error: unknown): string {
   return message.replace(/sk-[a-zA-Z0-9-_]+/g, '[REDACTED]');
 }
 
+/** Provider usage counters are untrusted input: keep finite numbers, drop anything else. */
+function usageCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 /**
  * Configuration for the LLM service (previously sourced from environment variables)
  */
@@ -85,6 +91,11 @@ export interface LLMServiceConfig {
   httpReferer?: string;
   appTitle?: string;
   debug?: boolean;
+  /**
+   * Permit connections to private, loopback, and link-local endpoints. Default false:
+   * every connection (redirect hops included) must reach a public address.
+   */
+  allowPrivateNetworks?: boolean;
 }
 
 export class LLMService {
@@ -92,12 +103,14 @@ export class LLMService {
   private readonly httpReferer: string;
   private readonly appTitle: string;
   private readonly debug: boolean;
+  private readonly allowPrivateNetworks: boolean;
 
   constructor(config: LLMServiceConfig = {}) {
     this.baseUrl = config.baseUrl ?? 'https://openrouter.ai/api/v1';
     this.httpReferer = config.httpReferer ?? 'https://github.com/charlesjones-dev/a11yhawk';
     this.appTitle = config.appTitle ?? 'A11yHawk';
     this.debug = config.debug ?? false;
+    this.allowPrivateNetworks = config.allowPrivateNetworks ?? false;
   }
 
   /**
@@ -112,6 +125,9 @@ export class LLMService {
         'HTTP-Referer': this.httpReferer,
         'X-Title': this.appTitle,
       },
+      // The endpoint receives the API key and the scan data, so unless private networks
+      // are allowed it must stay public on every connection, not just at validation time.
+      ...(this.allowPrivateNetworks ? {} : { httpAgent: createGuardedAgent(new URL(this.baseUrl).protocol) }),
     });
   }
 
@@ -237,13 +253,13 @@ export class LLMService {
         const usageData = completion.usage as OpenRouterUsage; // OpenRouter extends standard usage object
 
         usage = {
-          promptTokens: usageData.prompt_tokens || 0,
-          completionTokens: usageData.completion_tokens || 0,
-          totalTokens: usageData.total_tokens || 0,
-          cost: usageData.cost || 0,
+          promptTokens: usageCount(usageData.prompt_tokens) ?? 0,
+          completionTokens: usageCount(usageData.completion_tokens) ?? 0,
+          totalTokens: usageCount(usageData.total_tokens) ?? 0,
+          cost: usageCount(usageData.cost) ?? 0,
           modelId: model,
-          cachedTokens: usageData.prompt_tokens_details?.cached_tokens,
-          reasoningTokens: usageData.completion_tokens_details?.reasoning_tokens,
+          cachedTokens: usageCount(usageData.prompt_tokens_details?.cached_tokens),
+          reasoningTokens: usageCount(usageData.completion_tokens_details?.reasoning_tokens),
         };
       }
 
@@ -323,12 +339,15 @@ export class LLMService {
           // Ignore JSON parse errors
         }
       }
+      const cause = (error as { cause?: unknown })?.cause;
       log.error('LLM API error', {
         durationMs: duration,
         model,
         status: errorStatus,
         errorName: error instanceof Error ? error.name : 'Unknown',
         providerError: providerError || errorResponse?.message || errorMessage,
+        // Connection failures (including a guarded-agent refusal) carry the reason here.
+        ...(cause instanceof Error ? { cause: sanitizeErrorMessage(cause) } : {}),
       });
 
       // The raw provider error is intentionally NOT chained as `cause` on any
@@ -354,6 +373,14 @@ export class LLMService {
       if (errorStatus === 429 || errorMessage?.includes('429')) {
         // eslint-disable-next-line preserve-caught-error
         throw new Error('Rate limit exceeded. Please wait a moment or try another model.');
+      }
+
+      // Any other HTTP error: report the status only. The SDK's message embeds the
+      // endpoint's response body, which is logged above but must not travel back to
+      // whoever chose the endpoint (a server client, through GET /scans/:id).
+      if (typeof errorStatus === 'number') {
+        // eslint-disable-next-line preserve-caught-error
+        throw new Error(`LLM request failed with HTTP ${errorStatus}.`);
       }
 
       // Sanitize and throw generic error for other cases

@@ -38,7 +38,7 @@ import { LLMService } from './llm.js';
 import { generateMarkdownFromStructured } from './markdown-generator.js';
 import { PlaywrightService } from './playwright.js';
 import { buildJsonScanPrompt, findWcagCriterion, getWcagCriteria, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
-import { BlockedRequestError } from './request-guard.js';
+import { BlockedRequestError, checkRequestTarget } from './request-guard.js';
 import { validateUrl } from './url-validator.js';
 
 /**
@@ -270,6 +270,26 @@ export function resolveLighthouseConfig(option: ScanOptions['lighthouse']): Reso
   return { categories: categories as LighthouseCategory[], includeRaw: option.includeRaw === true };
 }
 
+/**
+ * Reject an `llm.baseUrl` that is not http(s) or that points at a private, loopback, or
+ * link-local host, unless private networks are allowed. The endpoint receives the API key
+ * and the scan data, so a caller-chosen URL could otherwise turn the engine into a proxy
+ * onto internal services. Throws invalid-options. Exported for the server's request
+ * sanitizer, which applies the same rule at request time; not part of the public API.
+ */
+export async function assertLlmBaseUrlAllowed(baseUrl: string, allowPrivateNetworks: boolean): Promise<void> {
+  const verdict = await checkRequestTarget(baseUrl, { allowPrivateNetworks });
+  if (!verdict.allowed) {
+    // Deliberately generic: the verdict can name the private address a hostname resolves
+    // to, and a server client must not be able to map internal DNS names this way.
+    throw new ScanError(
+      'invalid-options',
+      'llm.baseUrl is not allowed: it must be an http(s) URL on a public address unless private networks are allowed.',
+      false,
+    );
+  }
+}
+
 /** The `standard` string recorded on a scan, e.g. "WCAG 2.1 - AA". */
 function formatStandard(wcagVersion: WcagVersion, wcagLevel: WcagLevel): string {
   return `WCAG ${wcagVersion} - ${wcagLevel}`;
@@ -457,6 +477,11 @@ export class A11yHawkEngine {
           throw new ScanError('invalid-url', `Scan URL failed security validation: ${validation.error}`, false);
         }
       }
+      // Checked before any browser work so a refused endpoint fails fast and is not
+      // retried. LLMService's guarded agent re-checks every connection at request time.
+      if (options.llm?.baseUrl !== undefined) {
+        await assertLlmBaseUrlAllowed(options.llm.baseUrl, this.allowPrivateNetworks);
+      }
 
       // Capture phase. The browser is shared across capture, the Lighthouse
       // audit (reconnects via CDP port), and annotation; released in finally.
@@ -560,6 +585,7 @@ export class A11yHawkEngine {
           httpReferer: llm.httpReferer,
           appTitle: llm.appTitle,
           debug: llm.debug,
+          allowPrivateNetworks: this.allowPrivateNetworks,
         });
 
         const generationParams = llm.generationParams

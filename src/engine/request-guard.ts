@@ -27,8 +27,18 @@
  * connections are not intercepted by route handlers, and the Lighthouse subprocess
  * performs its own un-intercepted navigation. Blocking non-public egress at the network
  * layer is the only complete fix for those.
+ *
+ * The same module also guards the engine's own Node-side requests: createGuardedAgent
+ * gives the LLM client an HTTP(S) agent that refuses private addresses on every
+ * connection, because a caller-chosen `llm.baseUrl` is just as much an SSRF target.
  */
 import * as dns from 'dns/promises';
+import http from 'node:http';
+import type { ClientRequestArgs } from 'node:http';
+import https from 'node:https';
+import { isIP } from 'node:net';
+import type { LookupFunction } from 'node:net';
+import type { Duplex } from 'node:stream';
 import type { BrowserContext, Page, Request } from 'playwright';
 import { validateUrlSync, isPrivateIpAddress } from './url-validator.js';
 import type { Logger } from '../logger/index.js';
@@ -315,4 +325,73 @@ export async function installRequestGuard(
       }
     },
   };
+}
+
+// --- Node-side connection guard ----------------------------------------------
+
+/**
+ * `lookup` for guarded agents: resolves every address for the host and fails if any is
+ * private. Node calls it while opening the socket, so the address checked is the address
+ * connected to and there is no rebinding window. Exported for tests.
+ */
+export const lookupPublicAddress: LookupFunction = (hostname, options, callback) => {
+  dns
+    .lookup(hostname, { ...options, all: true })
+    .then((addresses) => {
+      const privateAddress = addresses.find((entry) => isPrivateIpAddress(entry.address));
+      if (privateAddress) {
+        callback(new BlockedRequestError(`${hostname} resolves to private address ${privateAddress.address}`), []);
+        return;
+      }
+      const first = addresses[0];
+      if (options.all) {
+        callback(null, addresses);
+      } else if (first) {
+        callback(null, first.address, first.family);
+      } else {
+        callback(Object.assign(new Error(`No address found for ${hostname}`), { code: 'ENOTFOUND' }), []);
+      }
+    })
+    .catch((error: NodeJS.ErrnoException) => callback(error, []));
+};
+
+/** Reason to refuse a connection whose host is already an IP literal (Node skips `lookup` for those). */
+function privateLiteralReason(host: string | null | undefined): string | null {
+  const address = (host ?? '').replace(/^\[|\]$/g, '');
+  if (isIP(address) === 0 || !isPrivateIpAddress(address)) return null;
+  return `${address} is a private address`;
+}
+
+type ConnectionCallback = (err: Error | null, stream: Duplex) => void;
+
+class GuardedHttpAgent extends http.Agent {
+  override createConnection(options: ClientRequestArgs, callback?: ConnectionCallback): Duplex | null | undefined {
+    const reason = privateLiteralReason(options.host ?? options.hostname);
+    if (reason) {
+      callback?.(new BlockedRequestError(reason), undefined as unknown as Duplex);
+      return undefined;
+    }
+    return super.createConnection({ ...options, lookup: lookupPublicAddress }, callback);
+  }
+}
+
+class GuardedHttpsAgent extends https.Agent {
+  override createConnection(options: ClientRequestArgs, callback?: ConnectionCallback): Duplex | null | undefined {
+    const reason = privateLiteralReason(options.host ?? options.hostname);
+    if (reason) {
+      callback?.(new BlockedRequestError(reason), undefined as unknown as Duplex);
+      return undefined;
+    }
+    return super.createConnection({ ...options, lookup: lookupPublicAddress }, callback);
+  }
+}
+
+/**
+ * HTTP(S) agent that refuses to connect to private, loopback, or link-local addresses. For
+ * Node-side requests whose destination a caller can choose (the LLM client). The check
+ * runs per connection, so redirect hops and a re-resolved hostname are covered too; a
+ * redirect to the other scheme fails because the agent only speaks `protocol`.
+ */
+export function createGuardedAgent(protocol: string): http.Agent {
+  return protocol === 'https:' ? new GuardedHttpsAgent() : new GuardedHttpAgent();
 }

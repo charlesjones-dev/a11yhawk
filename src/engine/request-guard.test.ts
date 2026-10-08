@@ -1,3 +1,5 @@
+import http from 'node:http';
+import https from 'node:https';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Page } from 'playwright';
 
@@ -9,7 +11,14 @@ vi.mock('dns/promises', () => ({
   resolve6: vi.fn(),
 }));
 
-import { checkRequestTarget, clearDnsVerdictCache, installRequestGuard, BlockedRequestError } from './request-guard.js';
+import {
+  checkRequestTarget,
+  clearDnsVerdictCache,
+  createGuardedAgent,
+  installRequestGuard,
+  lookupPublicAddress,
+  BlockedRequestError,
+} from './request-guard.js';
 
 const mockLogger = {
   info: vi.fn(),
@@ -408,5 +417,67 @@ describe('Request Guard — installRequestGuard', () => {
     const blocked = await env.routeRequest({ url: 'ftp://127.0.0.1/', isNavigation: true });
     expect(blocked.abort).toHaveBeenCalledWith('blockedbyclient');
     expect(guard.violation?.url).toBe('ftp://127.0.0.1/');
+  });
+});
+
+describe('Request Guard — guarded agent (Node-side requests)', () => {
+  function lookup(hostname: string, all: boolean): Promise<{ err: Error | null; result: unknown }> {
+    return new Promise((resolve) => {
+      lookupPublicAddress(hostname, { all }, (err, address, family) => {
+        resolve({ err, result: all ? address : { address, family } });
+      });
+    });
+  }
+
+  /** GET through a guarded agent and report the error the request fails with. */
+  function requestError(url: string): Promise<Error> {
+    const agent = createGuardedAgent(new URL(url).protocol);
+    const client = url.startsWith('https:') ? https : http;
+    return new Promise((resolve, reject) => {
+      const req = client.get(url, { agent }, () => reject(new Error('request unexpectedly succeeded')));
+      req.on('error', resolve);
+    });
+  }
+
+  it('passes public lookup answers through in both lookup shapes', async () => {
+    mockLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+
+    expect(await lookup('example.com', true)).toEqual({ err: null, result: [{ address: '93.184.216.34', family: 4 }] });
+    expect(await lookup('example.com', false)).toEqual({ err: null, result: { address: '93.184.216.34', family: 4 } });
+  });
+
+  it('fails the lookup when any answer is private', async () => {
+    mockLookup.mockResolvedValue([
+      { address: '93.184.216.34', family: 4 },
+      { address: '169.254.169.254', family: 4 },
+    ]);
+
+    const { err } = await lookup('rebind.test', false);
+    expect(err).toBeInstanceOf(BlockedRequestError);
+    expect(err?.message).toContain('169.254.169.254');
+  });
+
+  it.each(['http://169.254.169.254/latest/meta-data/', 'http://[::1]:8080/', 'https://10.0.0.5/'])(
+    'refuses an IP-literal private target without opening a socket: %s',
+    async (url) => {
+      const httpSocket = vi.spyOn(http.Agent.prototype, 'createConnection');
+      const httpsSocket = vi.spyOn(https.Agent.prototype, 'createConnection');
+
+      const error = await requestError(url);
+
+      expect(error).toBeInstanceOf(BlockedRequestError);
+      expect(httpSocket).not.toHaveBeenCalled();
+      expect(httpsSocket).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a hostname that resolves to a private address at connect time', async () => {
+    // Loopback port 1: if the guard ever let this through, the connect would be refused
+    // locally (ECONNREFUSED), not reach another host, and the assertion would fail.
+    mockLookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+
+    const error = await requestError('http://internal.test:1/');
+
+    expect(error).toBeInstanceOf(BlockedRequestError);
   });
 });

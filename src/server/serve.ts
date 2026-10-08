@@ -25,8 +25,8 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
-import { renderHtmlReport } from '../engine/html-report.js';
-import { A11yHawkEngine, resolveLighthouseConfig, ScanError } from '../engine/scan.js';
+import { HTML_REPORT_CSP, renderHtmlReport } from '../engine/html-report.js';
+import { A11yHawkEngine, assertLlmBaseUrlAllowed, resolveLighthouseConfig, ScanError } from '../engine/scan.js';
 import type {
   EngineOptions,
   ScanLighthouseOptions,
@@ -47,6 +47,13 @@ const REDACTED = '[redacted]';
 
 /** How often the background sweep runs to evict expired jobs. */
 const SWEEP_INTERVAL_MS = 60_000;
+
+/**
+ * Most scans allowed to wait for a free slot. A queued job holds its options until it runs
+ * and is never swept, so without a cap any client could grow memory without limit. Past
+ * the cap POST /scans answers 503 until the queue drains.
+ */
+const MAX_QUEUED_JOBS = 100;
 
 /** Job lifecycle states surfaced to clients. */
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
@@ -482,6 +489,21 @@ export function createA11yHawkServer(config: A11yHawkServerConfig): A11yHawkServ
       sendError(res, 400, 'invalid-request', sanitized.message);
       return;
     }
+    // The engine applies the same rule at scan time; checking here turns a doomed job
+    // into an immediate 400.
+    const baseUrl = sanitized.value.options.llm?.baseUrl;
+    if (baseUrl !== undefined) {
+      try {
+        await assertLlmBaseUrlAllowed(baseUrl, allowPrivateNetworks);
+      } catch (error) {
+        sendError(res, 400, 'invalid-request', error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+    if (queue.length >= MAX_QUEUED_JOBS) {
+      sendError(res, 503, 'queue-full', `${MAX_QUEUED_JOBS} scans are already waiting. Retry later.`);
+      return;
+    }
     const id = randomUUID();
     const job: Job = {
       id,
@@ -519,6 +541,10 @@ export function createA11yHawkServer(config: A11yHawkServerConfig): A11yHawkServ
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'content-length': Buffer.byteLength(html),
+      // The report carries page- and model-derived text on this server's origin; the
+      // policy keeps any markup that slips past escaping from running script.
+      'content-security-policy': HTML_REPORT_CSP,
+      'x-content-type-options': 'nosniff',
     });
     res.end(html);
   }
@@ -530,6 +556,7 @@ export function createA11yHawkServer(config: A11yHawkServerConfig): A11yHawkServ
       status: 'ok',
       uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
       jobs: counts,
+      queueLimit: MAX_QUEUED_JOBS,
     });
   }
 
