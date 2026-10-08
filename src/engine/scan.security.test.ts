@@ -219,12 +219,14 @@ describe('model output is not trusted', () => {
         issues: [
           { ...issue('A-001', 'blocker'), wcagLevel: 'AAAA', fixPriority: 'whenever' },
           { ...issue('A-002', 'Critical'), wcagLevel: 'aa' },
+          { ...issue('A-003', 'high'), fixPriority: ' low priority ' },
         ],
       }),
     );
-    const [first, second] = report.structured.issues;
+    const [first, second, third] = report.structured.issues;
     expect(first).toMatchObject({ severity: 'medium', wcagLevel: 'A', fixPriority: 'Medium Priority' });
     expect(second).toMatchObject({ severity: 'critical', wcagLevel: 'AA' });
+    expect(third).toMatchObject({ severity: 'high', fixPriority: 'Low Priority' });
     const stats = report.structured.statistics;
     expect(stats.criticalIssues + stats.highIssues + stats.mediumIssues + stats.lowIssues).toBe(stats.totalIssues);
     expect(() => renderHtmlReport(report)).not.toThrow();

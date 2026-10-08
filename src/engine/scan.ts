@@ -213,18 +213,12 @@ function text(value: unknown, fallback = ''): string {
   return typeof value === 'string' && value !== '' ? value : fallback;
 }
 
-/** `value` if it is one of `allowed` once trimmed and case-normalized, else undefined. */
-function oneOf<T extends string>(
-  value: unknown,
-  allowed: readonly T[],
-  normalize: (v: string) => string,
-): T | undefined {
+/** The allowed value `value` matches, ignoring surrounding whitespace and case, else undefined. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   if (typeof value !== 'string') return undefined;
-  const candidate = normalize(value.trim());
-  return allowed.find((option) => option === candidate);
+  const candidate = value.trim().toLowerCase();
+  return allowed.find((option) => option.toLowerCase() === candidate);
 }
-
-const upper = (v: string): string => v.toUpperCase();
 
 /**
  * Coerce one issue into the result shape and fill engine-owned defaults. Model output is
@@ -232,20 +226,20 @@ const upper = (v: string): string => v.toUpperCase();
  * becomes empty, so renderers and statistics never see unexpected values.
  */
 function normalizeIssue(issue: { [K in keyof AccessibilityIssue]?: unknown }, index: number): AccessibilityIssue {
-  const severity = oneOf(issue.severity, SEVERITIES, (v) => v.toLowerCase()) ?? 'medium';
+  const severity = oneOf(issue.severity, SEVERITIES) ?? 'medium';
   return {
     id: text(issue.id, `issue-${index + 1}`),
     title: text(issue.title, 'Untitled issue'),
     severity,
     wcagCriteria: text(issue.wcagCriteria),
-    wcagLevel: oneOf(issue.wcagLevel, WCAG_LEVELS, upper) ?? 'A',
+    wcagLevel: oneOf(issue.wcagLevel, WCAG_LEVELS) ?? 'A',
     location: text(issue.location),
     patternDetected: text(issue.patternDetected),
     codeContext: typeof issue.codeContext === 'string' ? issue.codeContext : null,
     impact: text(issue.impact),
     userImpact: text(issue.userImpact),
     recommendation: text(issue.recommendation),
-    fixPriority: oneOf(issue.fixPriority, FIX_PRIORITIES, (v) => v) ?? FIX_PRIORITY_FROM_SEVERITY[severity],
+    fixPriority: oneOf(issue.fixPriority, FIX_PRIORITIES) ?? FIX_PRIORITY_FROM_SEVERITY[severity],
     remediation: text(issue.remediation),
     resolved: false,
     resolvedAt: null,
@@ -268,7 +262,7 @@ function normalizeCoverage(value: unknown): WCAGCoverage[] {
       {
         criteriaId,
         name: text(row.name, criteriaId),
-        level: oneOf(row.level, WCAG_LEVELS, upper) ?? 'A',
+        level: oneOf(row.level, WCAG_LEVELS) ?? 'A',
         passed: row.passed === true,
         ...(issueIds ? { issues: issueIds } : {}),
       },
