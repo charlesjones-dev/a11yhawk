@@ -7,7 +7,9 @@ on:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: playwright 1.57 has no Ubuntu 26.04 build, so the
+    # Chromium install below fails there. Revisit with a playwright >= 1.61 bump.
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         node: [20, 22, 24]
