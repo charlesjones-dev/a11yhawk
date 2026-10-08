@@ -17,6 +17,9 @@ import { createLogger, type Logger } from '../logger/index.js';
 import type {
   AccessibilityIssue,
   GenerationParams,
+  LlmEffort,
+  LlmProvider,
+  ModelPricing,
   PassedCheck,
   ScanHeader,
   ScanUsage,
@@ -44,16 +47,26 @@ import { BlockedRequestError, checkRequestTarget } from './request-guard.js';
 import { validateUrl } from './url-validator.js';
 
 /**
- * Default LLM model (OpenRouter id). Always overridable via options.llm.model.
+ * Default LLM model for the OpenRouter provider (OpenRouter id). Always overridable via
+ * options.llm.model.
  */
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5';
 
-const DEFAULT_GENERATION_PARAMS: Required<GenerationParams> = {
+/** Default LLM model for the Anthropic provider (Claude API id). */
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5';
+
+const DEFAULT_GENERATION_PARAMS: Required<Omit<GenerationParams, 'effort'>> = {
   temperature: 0.2,
   topP: 0.95,
   frequencyPenalty: 0,
   maxTokens: 64000,
 };
+
+/** Accepted ScanLlmOptions.provider values. Not part of the public API. */
+export const LLM_PROVIDERS: readonly LlmProvider[] = ['openrouter', 'anthropic'];
+
+/** Accepted generationParams.effort values. Not part of the public API. */
+export const LLM_EFFORTS: readonly LlmEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 export type ScanErrorCode =
   | 'invalid-options'
@@ -62,7 +75,9 @@ export type ScanErrorCode =
   | 'capture-failed'
   | 'lighthouse-failed'
   | 'llm-auth'
+  | 'llm-billing'
   | 'llm-rate-limit'
+  | 'llm-refused'
   | 'llm-failed'
   | 'llm-malformed';
 
@@ -95,15 +110,34 @@ export interface ScanProgressEvent {
 }
 
 export interface ScanLlmOptions {
-  /** API key for an OpenAI-compatible endpoint (OpenRouter by default). */
+  /** API key for the provider: an OpenRouter (or other OpenAI-compatible) key, or an Anthropic key. */
   apiKey: string;
-  /** Model id, e.g. an OpenRouter id. Defaults to DEFAULT_MODEL. */
+  /**
+   * Default 'openrouter': an OpenAI-compatible endpoint, OpenRouter unless `baseUrl` says
+   * otherwise. 'anthropic' calls the Claude API directly.
+   */
+  provider?: LlmProvider;
+  /** Model id. Defaults to DEFAULT_MODEL, or DEFAULT_ANTHROPIC_MODEL for the Anthropic provider. */
   model?: string;
-  /** OpenAI-compatible endpoint base URL. Defaults to OpenRouter. */
+  /** Endpoint base URL. Defaults to OpenRouter, or https://api.anthropic.com for the Anthropic provider. */
   baseUrl?: string;
+  /** OpenRouter only. */
   httpReferer?: string;
+  /** OpenRouter only. */
   appTitle?: string;
+  /** temperature, topP, and frequencyPenalty apply to OpenRouter only; effort to Anthropic only. */
   generationParams?: GenerationParams;
+  /**
+   * Anthropic only: token prices by model id, used to estimate usage.cost (the Claude API
+   * reports no dollar cost). Include fallback models as well: cost is 0 when any model
+   * that ran has no entry.
+   */
+  pricing?: Record<string, ModelPricing>;
+  /**
+   * Anthropic only: when the model declines a request, let the API retry it on Anthropic's
+   * recommended fallback model (`fallbacks: "default"`), on models that support it. Default true.
+   */
+  refusalFallback?: boolean;
   /** Verbose prompt/response logging. */
   debug?: boolean;
 }
@@ -359,6 +393,44 @@ export async function assertLlmBaseUrlAllowed(baseUrl: string, allowPrivateNetwo
   }
 }
 
+/**
+ * Reject LLM option values the types rule out but JavaScript callers can still pass: an
+ * unknown provider or effort, or a price that is not a non-negative number. Throws
+ * invalid-options before any browser work.
+ */
+function assertLlmOptionsValid(llm: ScanLlmOptions): void {
+  if (llm.provider !== undefined && !LLM_PROVIDERS.includes(llm.provider)) {
+    throw new ScanError(
+      'invalid-options',
+      `Unknown llm.provider "${String(llm.provider)}". Supported: ${LLM_PROVIDERS.join(', ')}.`,
+      false,
+    );
+  }
+  const effort = llm.generationParams?.effort;
+  if (effort !== undefined && !LLM_EFFORTS.includes(effort)) {
+    throw new ScanError(
+      'invalid-options',
+      `Unknown llm.generationParams.effort "${String(effort)}". Supported: ${LLM_EFFORTS.join(', ')}.`,
+      false,
+    );
+  }
+  const isPrice = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  for (const [model, price] of Object.entries(llm.pricing ?? {})) {
+    const valid =
+      isPrice(price?.inputPer1M) &&
+      isPrice(price?.outputPer1M) &&
+      (price.cacheReadPer1M === undefined || isPrice(price.cacheReadPer1M)) &&
+      (price.cacheWritePer1M === undefined || isPrice(price.cacheWritePer1M));
+    if (!valid) {
+      throw new ScanError(
+        'invalid-options',
+        `llm.pricing["${model}"] needs inputPer1M and outputPer1M, and every price must be a non-negative number.`,
+        false,
+      );
+    }
+  }
+}
+
 /** The `standard` string recorded on a scan, e.g. "WCAG 2.1 - AA". */
 function formatStandard(wcagVersion: WcagVersion, wcagLevel: WcagLevel): string {
   return `WCAG ${wcagVersion} - ${wcagLevel}`;
@@ -522,6 +594,12 @@ export class A11yHawkEngine {
       );
     }
 
+    if (options.llm) {
+      assertLlmOptionsValid(options.llm);
+    }
+    const provider: LlmProvider = options.llm?.provider ?? 'openrouter';
+    const model = options.llm?.model ?? (provider === 'anthropic' ? DEFAULT_ANTHROPIC_MODEL : DEFAULT_MODEL);
+
     let browserAcquired = false;
     try {
       // Validate at scan time, not just enqueue time: a low-TTL DNS record can
@@ -562,16 +640,15 @@ export class A11yHawkEngine {
       await this.playwright.acquireBrowser(log);
       browserAcquired = true;
 
-      const modelForTiling = options.llm?.model ?? DEFAULT_MODEL;
       const pageData = await this.playwright
         .analyzePage(
           url,
-          modelForTiling,
+          model,
           (message) => emit('capturing', message),
           (screenshot) => emit('capturing', 'Screenshot captured', screenshot),
           options.headers,
           log,
-          { captureScreenshot },
+          { captureScreenshot, llmProvider: options.llm?.provider },
         )
         .catch((error: unknown) => {
           // A blocked navigation or redirect is an attack or misconfiguration,
@@ -645,7 +722,6 @@ export class A11yHawkEngine {
 
       if (llmMode && options.llm) {
         const llm = options.llm;
-        const model = llm.model ?? DEFAULT_MODEL;
         emit('analyzing', `Analyzing with ${model}...`);
 
         const userPrompt = await buildJsonScanPrompt(
@@ -659,11 +735,14 @@ export class A11yHawkEngine {
         );
 
         const llmService = new LLMService({
+          provider,
           baseUrl: llm.baseUrl,
           httpReferer: llm.httpReferer,
           appTitle: llm.appTitle,
           debug: llm.debug,
           allowPrivateNetworks: this.allowPrivateNetworks,
+          pricing: llm.pricing,
+          refusalFallback: llm.refusalFallback,
         });
 
         const generationParams = llm.generationParams
@@ -683,6 +762,11 @@ export class A11yHawkEngine {
           )
           .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : String(error);
+            // The Anthropic provider classifies its own failures.
+            if (error instanceof LlmRequestError && error.code !== undefined) {
+              const prefixed = error.code === 'llm-failed' ? `LLM analysis failed: ${message}` : message;
+              throw new ScanError(error.code, prefixed, error.retryable, { cause: error });
+            }
             // Classified by the endpoint's HTTP status, never by message text.
             const status = error instanceof LlmRequestError ? error.status : undefined;
             if (status === 401) {
@@ -702,6 +786,7 @@ export class A11yHawkEngine {
         pageData.accessibilityTree = null as unknown as typeof pageData.accessibilityTree;
 
         if (scanResult.usage) {
+          const { cacheWriteTokens, servedModelId } = scanResult.usage;
           usage = {
             promptTokens: scanResult.usage.promptTokens,
             completionTokens: scanResult.usage.completionTokens,
@@ -711,6 +796,9 @@ export class A11yHawkEngine {
             modelId: scanResult.usage.modelId,
             cachedTokens: scanResult.usage.cachedTokens,
             reasoningTokens: scanResult.usage.reasoningTokens,
+            ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+            provider,
+            ...(servedModelId !== undefined ? { servedModelId } : {}),
           };
         }
 

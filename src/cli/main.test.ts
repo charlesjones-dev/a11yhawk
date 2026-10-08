@@ -261,7 +261,9 @@ describe('exitCodeForScanError', () => {
     'capture-failed',
     'lighthouse-failed',
     'llm-auth',
+    'llm-billing',
     'llm-rate-limit',
+    'llm-refused',
     'llm-failed',
     'llm-malformed',
   ];

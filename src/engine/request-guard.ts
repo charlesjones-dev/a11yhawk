@@ -33,6 +33,7 @@
  * The same module also guards the engine's own Node-side requests: createGuardedAgent
  * gives the LLM client an HTTP(S) agent that refuses private addresses on every
  * connection, because a caller-chosen `llm.baseUrl` is just as much an SSRF target.
+ * createGuardedFetch wraps that agent in a `fetch` for clients that take one instead.
  */
 import * as dns from 'dns/promises';
 import http from 'node:http';
@@ -40,6 +41,7 @@ import type { ClientRequestArgs } from 'node:http';
 import https from 'node:https';
 import { isIP } from 'node:net';
 import type { LookupFunction } from 'node:net';
+import { Readable } from 'node:stream';
 import type { Duplex } from 'node:stream';
 import type { BrowserContext, CDPSession, Page, Request } from 'playwright';
 import { validateUrlSync, isPrivateIpAddress } from './url-validator.js';
@@ -452,4 +454,62 @@ class GuardedHttpsAgent extends https.Agent {
  */
 export function createGuardedAgent(protocol: string): http.Agent {
   return protocol === 'https:' ? new GuardedHttpsAgent() : new GuardedHttpAgent();
+}
+
+/** Close a guarded fetch whose socket sees no traffic this long, as the built-in fetch does by default. */
+const GUARDED_FETCH_IDLE_TIMEOUT_MS = 300_000;
+
+/** Statuses whose responses carry no body. */
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
+/**
+ * `fetch` that sends every request through createGuardedAgent, for clients that take a
+ * fetch function rather than an HTTP agent (the Anthropic SDK). The built-in fetch has no
+ * agent hook, so this is a small fetch over node:http(s) that keeps the agent's
+ * per-connection check.
+ *
+ * It does not follow redirects: a 3xx comes back as-is, and the caller treats it as a
+ * failed request. It asks for an uncompressed body, because node:http does not decode one,
+ * and buffers the request body, which is a single JSON document for an LLM call.
+ */
+export function createGuardedFetch(protocol: string): typeof fetch {
+  const agent = createGuardedAgent(protocol);
+  return async (input, init) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    if (url.protocol !== protocol) {
+      throw new BlockedRequestError(`${url.protocol} request refused by a ${protocol} connection guard`);
+    }
+    const body = request.body ? Buffer.from(await request.arrayBuffer()) : undefined;
+    const headers: Record<string, string> = Object.fromEntries(request.headers);
+    headers['accept-encoding'] = 'identity';
+    if (body) headers['content-length'] = String(body.length);
+
+    const transport = url.protocol === 'https:' ? https : http;
+    return new Promise<Response>((resolve, reject) => {
+      const req = transport.request(url, { method: request.method, headers, agent, signal: request.signal }, (res) => {
+        const status = res.statusCode ?? 0;
+        if (status < 200 || status > 599) {
+          res.destroy();
+          reject(new Error(`Unexpected HTTP status ${status}`));
+          return;
+        }
+        const responseHeaders = new Headers();
+        for (const [name, value] of Object.entries(res.headers)) {
+          for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+            responseHeaders.append(name, item);
+          }
+        }
+        const hasBody = !NULL_BODY_STATUSES.has(status) && request.method !== 'HEAD';
+        const responseBody = hasBody ? (Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>) : null;
+        if (!hasBody) res.resume();
+        resolve(new Response(responseBody, { status, statusText: res.statusMessage, headers: responseHeaders }));
+      });
+      req.setTimeout(GUARDED_FETCH_IDLE_TIMEOUT_MS, () => {
+        req.destroy(new Error(`No data from the endpoint for ${GUARDED_FETCH_IDLE_TIMEOUT_MS / 1000} seconds`));
+      });
+      req.on('error', reject);
+      req.end(body);
+    });
+  };
 }

@@ -333,7 +333,9 @@ export const EXIT_FOR_SCAN_ERROR: Record<ScanErrorCode, number> = {
   'capture-failed': EXIT_SCAN_ERROR,
   'lighthouse-failed': EXIT_SCAN_ERROR,
   'llm-auth': EXIT_SCAN_ERROR,
+  'llm-billing': EXIT_SCAN_ERROR,
   'llm-rate-limit': EXIT_SCAN_ERROR,
+  'llm-refused': EXIT_SCAN_ERROR,
   'llm-failed': EXIT_SCAN_ERROR,
   'llm-malformed': EXIT_SCAN_ERROR,
 };

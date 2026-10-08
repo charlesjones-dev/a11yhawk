@@ -4,7 +4,7 @@
  * Playwright page capture, Lighthouse accessibility audits, and BYOK LLM
  * analysis producing structured WCAG reports. See the README for usage.
  */
-export { A11yHawkEngine, DEFAULT_MODEL, ScanError, scan } from './engine/scan.js';
+export { A11yHawkEngine, DEFAULT_ANTHROPIC_MODEL, DEFAULT_MODEL, ScanError, scan } from './engine/scan.js';
 export type {
   EngineOptions,
   OneShotScanOptions,
@@ -20,6 +20,9 @@ export type {
   AccessibilityIssue,
   CostType,
   GenerationParams,
+  LlmEffort,
+  LlmProvider,
+  ModelPricing,
   PassedCheck,
   ScanHeader,
   ScanHeaderType,
