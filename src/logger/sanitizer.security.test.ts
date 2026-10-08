@@ -40,6 +40,30 @@ describe('URL credentials in logs', () => {
     });
   });
 
+  it('masks userinfo that contains an apostrophe or a raw @', () => {
+    expect(sanitizeString("https://alice:p'ass@example.com/")).toBe(`https://${MASK}@example.com/`);
+    expect(sanitizeString('https://alice:p@ss@example.com/')).toBe(`https://${MASK}@example.com/`);
+  });
+
+  it('matches percent-encoded and bracketed parameter names', () => {
+    expect(sanitizeString('https://example.com/?to%6ben=secret-value&tags[]=a')).toBe(
+      `https://example.com/?to%6ben=${MASK}&tags[]=a`,
+    );
+    expect(sanitizeString('https://example.com/?user[password]=p&token[]=t')).toBe(
+      `https://example.com/?user[password]=${MASK}&token[]=${MASK}`,
+    );
+    // A malformed escape must not throw.
+    expect(sanitizeString('https://example.com/?%E0%A4%A=1&token=t')).toBe(
+      `https://example.com/?%E0%A4%A=1&token=${MASK}`,
+    );
+  });
+
+  it('masks token-like values in the fragment', () => {
+    expect(sanitizeString('https://app.example.com/cb#access_token=abc&token_type=bearer&state=s')).toBe(
+      `https://app.example.com/cb#access_token=${MASK}&token_type=bearer&state=s`,
+    );
+  });
+
   it('leaves URLs without credentials unchanged', () => {
     const url = 'https://example.com/products;color=red?page=2&sort=asc#top';
     expect(sanitizeString(url)).toBe(url);

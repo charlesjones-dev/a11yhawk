@@ -127,20 +127,36 @@ const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; name: string; isConnectionStr
 
 // http(s), ws(s), and ftp URLs, which reach the logs whole (scan targets, blocked requests).
 // A fixed scheme list keeps the scan linear: no unbounded run precedes the literal "://".
-const URL_PATTERN = /\b(?:https?|wss?|ftp):\/\/[^\s"'<>]+/gi;
+// Apostrophes are valid URL characters (userinfo included), so only whitespace, `"`, `<`,
+// and `>` end a URL; a closing quote right after a credential value is masked with it.
+const URL_PATTERN = /\b(?:https?|wss?|ftp):\/\/[^\s"<>]+/gi;
 
-// Query parameter names whose values are credentials: anything ending in token, secret,
-// password, signature, credential, api key, access key, session id, or auth, plus a few
-// short names (key, sig, code, jwt, pass, pwd).
-const SENSITIVE_QUERY_PARAM =
-  /(?:token|secret|passw(?:or)?d|signature|credential|api[-_]?key|access[-_]?key|sess(?:ion)?(?:[-_]?id)?|auth(?:orization)?)$|^(?:key|sig|code|jwt|pass|pwd)$/i;
+// Query and fragment parameter names whose values are credentials, tested on the decoded
+// name with everything but letters and digits removed (`X-Amz-Signature`, `api_key`,
+// `user[password]`, `to%6Ben`): anything ending in token, secret, password, signature,
+// credential, api key, access key, session id, or auth, plus a few short names.
+const SENSITIVE_PARAM =
+  /(?:token|secret|passw(?:or)?d|signature|credential|apikey|accesskey|sess(?:ion)?(?:id)?|auth(?:orization)?)$|^(?:key|sig|code|jwt|pass|pwd)$/i;
 
-/** Mask a URL's userinfo and the values of its credential-like query parameters. */
+function isSensitiveParam(name: string): boolean {
+  let decoded = name;
+  try {
+    decoded = decodeURIComponent(name);
+  } catch {
+    // Malformed escape: test the raw name.
+  }
+  return SENSITIVE_PARAM.test(decoded.replace(/[^a-z0-9]/gi, ''));
+}
+
+/**
+ * Mask a URL's userinfo (everything up to the last `@` before the path) and the values of
+ * credential-like query and fragment parameters (OAuth puts tokens in the fragment).
+ */
 function maskUrlCredentials(url: string): string {
   return url
-    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/?#]*@/i, `$1${MASK}@`)
-    .replace(/([?&;])([^=&;#]*)=([^&;#]*)/g, (match, separator: string, name: string, value: string) =>
-      value !== '' && SENSITIVE_QUERY_PARAM.test(name) ? `${separator}${name}=${MASK}` : match,
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, `$1${MASK}@`)
+    .replace(/([?&;#])([^=&;#]*)=([^&;#]*)/g, (match, separator: string, name: string, value: string) =>
+      value !== '' && isSensitiveParam(name) ? `${separator}${name}=${MASK}` : match,
     );
 }
 
