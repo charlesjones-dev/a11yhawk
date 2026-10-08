@@ -1,4 +1,5 @@
 import * as dns from 'dns/promises';
+import { isIP } from 'node:net';
 
 // Blocklist of dangerous hosts and patterns
 const BLOCKED_HOSTS = [
@@ -69,53 +70,88 @@ const PRIVATE_IPV4_PATTERNS = [
 ];
 
 /**
- * Checks if an IPv6 address is private/internal
- * Handles addresses both with and without brackets
+ * Parse an IPv6 address (brackets, a zone ID, and a dotted IPv4 tail allowed) into its
+ * eight 16-bit groups. Returns null when the text is not a valid IPv6 address.
+ */
+function parseIPv6Groups(input: string): number[] | null {
+  let addr = input.replace(/^\[|\]$/g, '');
+  const zone = addr.indexOf('%');
+  if (zone !== -1) addr = addr.slice(0, zone);
+  if (isIP(addr) !== 6) return null;
+
+  // Rewrite a dotted IPv4 tail (::ffff:1.2.3.4) as two hex groups.
+  const lastColon = addr.lastIndexOf(':');
+  if (addr.includes('.', lastColon)) {
+    const [a = 0, b = 0, c = 0, d = 0] = addr
+      .slice(lastColon + 1)
+      .split('.')
+      .map(Number);
+    addr = `${addr.slice(0, lastColon + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+
+  const [head = '', tail] = addr.split('::');
+  const headGroups = head === '' ? [] : head.split(':');
+  const tailGroups = tail === undefined || tail === '' ? [] : tail.split(':');
+  const groups =
+    tail === undefined
+      ? headGroups
+      : [...headGroups, ...Array<string>(8 - headGroups.length - tailGroups.length).fill('0'), ...tailGroups];
+  return groups.length === 8 ? groups.map((group) => parseInt(group, 16)) : null;
+}
+
+/** Dotted IPv4 address held in two 16-bit groups. */
+function embeddedIPv4(high: number, low: number): string {
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
+/**
+ * Checks if an IPv6 address is private, internal, or reserved. Handles addresses with or
+ * without brackets. Prefixes that embed an IPv4 address (IPv4-mapped, NAT64 well-known,
+ * 6to4) are judged by that address, so a public site reached through DNS64 still passes.
+ * Returns false for anything without a colon (not IPv6); colon-bearing text that does not
+ * parse is treated as private.
  */
 function isPrivateIPv6(hostname: string): boolean {
-  // Remove brackets if present (URL parser gives us address without brackets)
-  const addr = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!hostname.includes(':')) return false;
+  const g = parseIPv6Groups(hostname);
+  if (!g) return true;
+  const [g0 = 0, g1 = 0, g2 = 0, g3 = 0, g4 = 0, g5 = 0, g6 = 0, g7 = 0] = g;
 
-  // Skip if not IPv6
-  if (!addr.includes(':')) return false;
-
-  // Expand :: to full form for proper prefix matching
-  // First, handle the special case of :: alone (all zeros)
-  if (addr === '::') return true; // Unspecified address
-
-  // fc00::/7 - Unique local addresses (fc00:: to fdff::)
-  if (/^f[cd][0-9a-f]{0,2}:/i.test(addr)) return true;
-
-  // fe80::/10 - Link-local addresses (fe80:: to febf::)
-  if (/^fe[89ab][0-9a-f]:/i.test(addr) || /^fe80:/i.test(addr)) return true;
-
-  // ::1 - Loopback (already handled in BLOCKED_HOSTS but be thorough)
-  if (addr === '::1') return true;
-
-  // ::ffff:x.x.x.x - IPv4-mapped IPv6 addresses
-  // URL parser may convert dotted decimal to hex (e.g., ::ffff:c0a8:101 for 192.168.1.1)
-  // Check for dotted decimal format first
-  const ipv4MappedMatch = addr.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
-  if (ipv4MappedMatch && ipv4MappedMatch[1]) {
-    const ipv4 = ipv4MappedMatch[1];
-    return PRIVATE_IPV4_PATTERNS.some((pattern) => pattern.test(ipv4));
+  // ::/96 - unspecified (::), loopback (::1), and deprecated IPv4-compatible (::a.b.c.d)
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return true;
+  // ::ffff:0:0/96 - IPv4-mapped
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff) {
+    return isPrivateIPv4(embeddedIPv4(g6, g7));
   }
-
-  // Check for hex format (::ffff:XXXX:XXXX where XXXX are hex representations of IPv4 octets)
-  const ipv4MappedHexMatch = addr.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-  if (ipv4MappedHexMatch && ipv4MappedHexMatch[1] && ipv4MappedHexMatch[2]) {
-    const high = parseInt(ipv4MappedHexMatch[1], 16);
-    const low = parseInt(ipv4MappedHexMatch[2], 16);
-    // Convert back to dotted decimal
-    const ipv4 = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-    return PRIVATE_IPV4_PATTERNS.some((pattern) => pattern.test(ipv4));
+  // ::ffff:0:0:0/96 - IPv4-translated (RFC 2765)
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0xffff && g5 === 0) return true;
+  // 64:ff9b::/96 - NAT64 well-known prefix (RFC 6052)
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
+    return isPrivateIPv4(embeddedIPv4(g6, g7));
   }
-
-  // 100::/64 - Discard prefix (RFC 6666)
-  if (/^100::/i.test(addr)) return true;
-
-  // 2001:db8::/32 - Documentation range
-  if (/^2001:db8:/i.test(addr)) return true;
+  // 64:ff9b:1::/48 - NAT64 local-use prefix (RFC 8215); the IPv4 position depends on the
+  // operator's prefix length, so the whole range is refused.
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 1) return true;
+  // 100::/64 - discard prefix (RFC 6666)
+  if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return true;
+  // 2001::/23 - IETF protocol assignments: Teredo, benchmarking, ORCHID, and others
+  if (g0 === 0x2001 && g1 < 0x200) return true;
+  // 2001:db8::/32 - documentation
+  if (g0 === 0x2001 && g1 === 0xdb8) return true;
+  // 2002::/16 - 6to4, judged by the IPv4 address in the next 32 bits
+  if (g0 === 0x2002) return isPrivateIPv4(embeddedIPv4(g1, g2));
+  // 3fff::/20 - documentation (RFC 9637)
+  if (g0 === 0x3fff && g1 < 0x1000) return true;
+  // 5f00::/16 - SRv6 SIDs (RFC 9602)
+  if (g0 === 0x5f00) return true;
+  // fc00::/7 - unique local
+  if ((g0 & 0xfe00) === 0xfc00) return true;
+  // fe80::/10 - link-local
+  if ((g0 & 0xffc0) === 0xfe80) return true;
+  // fec0::/10 - site-local (deprecated)
+  if ((g0 & 0xffc0) === 0xfec0) return true;
+  // ff00::/8 - multicast
+  if ((g0 & 0xff00) === 0xff00) return true;
 
   return false;
 }
@@ -139,6 +175,11 @@ export function isPrivateIpAddress(address: string): boolean {
   return isPrivateIPv4(address);
 }
 
+// Returned for a hostname that resolves to a private address. Deliberately names no
+// address: the message can reach whoever submitted the URL, who could otherwise map
+// internal DNS names. The address travels separately as `resolvedAddress`, for logs.
+const PRIVATE_RESOLUTION_ERROR = 'Domain resolves to a private or reserved IP address.';
+
 /**
  * Validates that a hostname resolves to public IP addresses only.
  * This prevents DNS rebinding attacks where a domain initially resolves
@@ -148,7 +189,9 @@ export function isPrivateIpAddress(address: string): boolean {
  * @param hostname - The hostname to validate
  * @returns Object with valid flag and optional error message
  */
-async function validateDnsResolution(hostname: string): Promise<{ valid: boolean; error?: string }> {
+async function validateDnsResolution(
+  hostname: string,
+): Promise<{ valid: boolean; error?: string; resolvedAddress?: string }> {
   // Skip DNS validation for IP addresses (already validated by other checks)
   // IPv4 check
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
@@ -165,10 +208,7 @@ async function validateDnsResolution(hostname: string): Promise<{ valid: boolean
       const ipv4Addresses = await dns.resolve4(hostname);
       for (const addr of ipv4Addresses) {
         if (isPrivateIPv4(addr)) {
-          return {
-            valid: false,
-            error: `Domain resolves to private IP address (${addr})`,
-          };
+          return { valid: false, error: PRIVATE_RESOLUTION_ERROR, resolvedAddress: addr };
         }
       }
     } catch {
@@ -180,10 +220,7 @@ async function validateDnsResolution(hostname: string): Promise<{ valid: boolean
       const ipv6Addresses = await dns.resolve6(hostname);
       for (const addr of ipv6Addresses) {
         if (isPrivateIPv6(addr)) {
-          return {
-            valid: false,
-            error: `Domain resolves to private IPv6 address (${addr})`,
-          };
+          return { valid: false, error: PRIVATE_RESOLUTION_ERROR, resolvedAddress: addr };
         }
       }
     } catch {
@@ -268,9 +305,12 @@ export function validateUrlSync(urlString: string): { valid: boolean; error?: st
  * 3. DNS resolution validation to prevent rebinding attacks
  *
  * @param urlString - The URL to validate
- * @returns Promise with validation result
+ * @returns Promise with validation result. `error` is safe to show the submitter;
+ *   `resolvedAddress` (the private address a hostname resolved to) is for logs only.
  */
-export async function validateUrl(urlString: string): Promise<{ valid: boolean; error?: string; url?: URL }> {
+export async function validateUrl(
+  urlString: string,
+): Promise<{ valid: boolean; error?: string; url?: URL; resolvedAddress?: string }> {
   // First, perform synchronous validation
   const syncResult = validateUrlSync(urlString);
   if (!syncResult.valid) {
@@ -280,7 +320,7 @@ export async function validateUrl(urlString: string): Promise<{ valid: boolean; 
   // Then perform DNS rebinding check
   const dnsResult = await validateDnsResolution(syncResult.url!.hostname);
   if (!dnsResult.valid) {
-    return { valid: false, error: dnsResult.error };
+    return { valid: false, error: dnsResult.error, resolvedAddress: dnsResult.resolvedAddress };
   }
 
   return syncResult;

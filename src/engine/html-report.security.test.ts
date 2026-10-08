@@ -1,7 +1,8 @@
 /**
  * Security regression tests for the HTML report: provider usage counters are escaped like
- * every other interpolated value, and the CSP served with the report allows exactly the
- * report's own inline script.
+ * every other interpolated value, the CSP served with the report allows exactly the
+ * report's own inline script, and model-shaped data the types do not promise (an unknown
+ * severity, missing arrays) renders instead of throwing.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -82,5 +83,62 @@ describe('HTML_REPORT_CSP', () => {
       .digest('base64');
     expect(HTML_REPORT_CSP).toContain(`script-src 'sha256-${hash}'`);
     expect(HTML_REPORT_CSP).toContain("default-src 'none'");
+  });
+});
+
+describe('HTML report with unexpected structured data', () => {
+  function withIssue(severity: string): StructuredScanOutput {
+    const s = structured();
+    s.issues = [
+      {
+        id: 'A-001',
+        title: 'Example',
+        severity: severity as 'medium',
+        wcagCriteria: '1.1.1',
+        wcagLevel: 'A',
+        location: 'img',
+        patternDetected: 'p',
+        codeContext: null,
+        impact: 'i',
+        userImpact: 'u',
+        recommendation: 'r',
+        fixPriority: 'Medium Priority',
+        remediation: 'm',
+        resolved: false,
+        resolvedAt: null,
+        resolvedNote: null,
+        resolvedByUserId: null,
+        resolvedByDisplayName: null,
+      },
+    ];
+    return s;
+  }
+
+  it('renders an issue whose severity is outside the enum instead of throwing', () => {
+    expect(() => renderHtmlReport(report({ structured: withIssue('urgent') }))).not.toThrow();
+  });
+
+  it('never puts an unknown severity into markup', () => {
+    const html = renderHtmlReport(report({ structured: withIssue('x" onmouseover="alert(1)') }));
+    expect(html).not.toContain('onmouseover');
+    expect(html).toContain('sev-medium');
+  });
+
+  it('renders output that omits wcagCoverage', () => {
+    const s = structured() as Partial<StructuredScanOutput>;
+    delete s.wcagCoverage;
+    expect(() => renderHtmlReport(report({ structured: s as StructuredScanOutput }))).not.toThrow();
+  });
+
+  it('renders output that omits passedChecks', () => {
+    const s = structured() as Partial<StructuredScanOutput>;
+    delete s.passedChecks;
+    expect(() => renderHtmlReport(report({ structured: s as StructuredScanOutput }))).not.toThrow();
+  });
+
+  it('renders a non-numeric score as 0', () => {
+    const s = structured();
+    (s as { overallScore: unknown }).overallScore = 'n/a';
+    expect(renderHtmlReport(report({ structured: s }))).toContain('Overall accessibility score 0 out of 100');
   });
 });

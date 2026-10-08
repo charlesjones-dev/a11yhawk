@@ -252,3 +252,10 @@ describe('GET /scans/:id/report.html', () => {
     expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
 });
+
+describe('request timeout', () => {
+  it('bounds how long a client may take to send its request', () => {
+    harness(async () => makeReport());
+    expect(open.at(-1)?.httpServer.requestTimeout).toBe(30_000);
+  });
+});

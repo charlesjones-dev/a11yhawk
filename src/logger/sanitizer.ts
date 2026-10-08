@@ -7,6 +7,7 @@
  * Sanitizes:
  * - API keys (OpenRouter, Anthropic, OpenAI patterns)
  * - Bearer tokens
+ * - URL credentials: userinfo and token-like query values
  * - Database connection strings (MongoDB, Redis)
  * - Generic secrets and passwords
  *
@@ -124,6 +125,56 @@ const SENSITIVE_PATTERNS: Array<{ pattern: RegExp; name: string; isConnectionStr
   { pattern: /[a-fA-F0-9]{64,}/g, name: 'Hex-encoded secret' },
 ];
 
+// http(s), ws(s), and ftp URLs, which reach the logs whole (scan targets, blocked requests).
+// A fixed scheme list keeps the scan linear: no unbounded run precedes the literal "://".
+// Apostrophes are valid URL characters (userinfo included), so only whitespace, `"`, `<`,
+// and `>` end a URL; a closing quote right after a credential value is masked with it.
+const URL_PATTERN = /\b(?:https?|wss?|ftp):\/\/[^\s"<>]+/gi;
+
+// Query and fragment parameter names whose values are credentials, tested on the decoded
+// name with everything but letters and digits removed (`X-Amz-Signature`, `api_key`,
+// `user[password]`, `to%6Ben`): anything ending in token, secret, password, signature,
+// credential, api key, access key, session id, or auth, plus a few short names.
+const SENSITIVE_PARAM =
+  /(?:token|secret|passw(?:or)?d|signature|credential|apikey|accesskey|sess(?:ion)?(?:id)?|auth(?:orization)?)$|^(?:key|sig|code|jwt|pass|pwd)$/i;
+
+function isSensitiveParam(name: string): boolean {
+  let decoded = name;
+  try {
+    decoded = decodeURIComponent(name);
+  } catch {
+    // Malformed escape: test the raw name.
+  }
+  return SENSITIVE_PARAM.test(decoded.replace(/[^a-z0-9]/gi, ''));
+}
+
+/** Mask the values of credential-like parameters in one URL section. */
+function maskParams(section: string, pattern: RegExp): string {
+  return section.replace(pattern, (match, separator: string, name: string, value: string) =>
+    value !== '' && isSensitiveParam(name) ? `${separator}${name}=${MASK}` : match,
+  );
+}
+
+/**
+ * Mask a URL's userinfo (everything up to the last `@` before the path) and the values of
+ * credential-like parameters. Each section splits parameters the way URL parsing does, so
+ * a value is masked whole: query and fragment parameters end only at `&` (a `;` or a later
+ * `#` stays inside the value; OAuth puts tokens in the fragment), and path parameters such
+ * as `;jsessionid=` end at `;` or `/`.
+ */
+function maskUrlCredentials(url: string): string {
+  const masked = url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, `$1${MASK}@`);
+  const hash = masked.indexOf('#');
+  const beforeHash = hash === -1 ? masked : masked.slice(0, hash);
+  const query = beforeHash.indexOf('?');
+  const path = query === -1 ? beforeHash : beforeHash.slice(0, query);
+  return (
+    maskParams(path, /(;)([^=;/]*)=([^;/]*)/g) +
+    maskParams(query === -1 ? '' : beforeHash.slice(query), /([?&])([^=&]*)=([^&]*)/g) +
+    maskParams(hash === -1 ? '' : masked.slice(hash), /([#&])([^=&]*)=([^&]*)/g)
+  );
+}
+
 /**
  * Sanitize a string value by masking sensitive patterns
  *
@@ -141,7 +192,7 @@ export function sanitizeString(str: string): string {
     return str;
   }
 
-  let sanitized = str;
+  let sanitized = str.replace(URL_PATTERN, maskUrlCredentials);
 
   for (const { pattern, isConnectionString } of SENSITIVE_PATTERNS) {
     // Reset regex state (important for global regexes)

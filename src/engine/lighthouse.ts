@@ -241,7 +241,16 @@ export function buildLighthouseCliArgs(
   categories: readonly LighthouseCategory[],
   cdpPort?: number,
 ): string[] {
-  const args = [url, '--output=json', '--output-path=stdout', `--only-categories=${categories.join(',')}`, '--quiet'];
+  const args = [
+    url,
+    '--output=json',
+    '--output-path=stdout',
+    `--only-categories=${categories.join(',')}`,
+    '--quiet',
+    // Pin Sentry error reporting off. Without the flag, Lighthouse reads a consent cached
+    // by any earlier interactive `lighthouse` run on the machine and may upload errors.
+    '--no-enable-error-reporting',
+  ];
   if (cdpPort) {
     // Connect to the existing Playwright browser instead of launching a new
     // Chrome. This saves memory by reusing the browser instance.
@@ -250,6 +259,33 @@ export function buildLighthouseCliArgs(
     args.push(`--chrome-flags=${CONTAINER_CHROME_FLAGS.join(' ')}`);
   }
   return args;
+}
+
+// Environment variables the Lighthouse child inherits. Everything else in the host's
+// environment (API keys, tokens, NODE_OPTIONS preloads) stays out of the third-party tree.
+// With --port Lighthouse makes no network requests of its own, so proxy and CA settings
+// are not needed.
+const LIGHTHOUSE_ENV_ALLOWLIST = [
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'SystemRoot',
+  'LANG',
+  'LC_ALL',
+];
+
+/** Build the Lighthouse child's environment from the allowlist. Pure; exported for tests. */
+export function buildLighthouseEnv(parentEnv: NodeJS.ProcessEnv, chromePath: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of LIGHTHOUSE_ENV_ALLOWLIST) {
+    const value = parentEnv[key];
+    if (value !== undefined) env[key] = value;
+  }
+  env.CHROME_PATH = chromePath;
+  return env;
 }
 
 /** Per-run options for a Lighthouse audit. */
@@ -396,10 +432,7 @@ export class LighthouseService {
       const child = spawn(process.execPath, [lighthouseCli, ...args], {
         shell: false,
         timeout: timeoutMs,
-        env: {
-          ...process.env,
-          CHROME_PATH: chromePath,
-        },
+        env: buildLighthouseEnv(process.env, chromePath),
       });
 
       const pid = child.pid;

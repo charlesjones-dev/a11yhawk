@@ -22,11 +22,13 @@
  *    capture result is trusted (otherwise a fast internal redirect could be captured and
  *    returned before a slow DNS verdict closes the page).
  *
- * Residual risk (documented in docs/kb/conventions/url-validation.md): a redirect hop
- * to an internal host still causes one blind GET before the page is killed, WebSocket
- * connections are not intercepted by route handlers, and the Lighthouse subprocess
- * performs its own un-intercepted navigation. Blocking non-public egress at the network
- * layer is the only complete fix for those.
+ * Pages the context guard never sees, above all the one Lighthouse opens over the CDP
+ * port, are covered by installBrowserRequestGuard, which intercepts every request in the
+ * browser (redirect hops included, before they are sent).
+ *
+ * Residual risk: WebSocket connections are intercepted by neither guard, and Chromium
+ * resolves hostnames itself after the guard's own lookup, which leaves a short DNS-rebinding
+ * window. Blocking non-public egress at the network layer is the only complete fix.
  *
  * The same module also guards the engine's own Node-side requests: createGuardedAgent
  * gives the LLM client an HTTP(S) agent that refuses private addresses on every
@@ -39,7 +41,7 @@ import https from 'node:https';
 import { isIP } from 'node:net';
 import type { LookupFunction } from 'node:net';
 import type { Duplex } from 'node:stream';
-import type { BrowserContext, Page, Request } from 'playwright';
+import type { BrowserContext, CDPSession, Page, Request } from 'playwright';
 import { validateUrlSync, isPrivateIpAddress } from './url-validator.js';
 import type { Logger } from '../logger/index.js';
 
@@ -53,7 +55,10 @@ export class BlockedRequestError extends Error {
 
 export interface TargetVerdict {
   allowed: boolean;
+  /** Why the target was refused. Can reach the scan's submitter, so it never names an address. */
   reason?: string;
+  /** The private address a hostname resolved to, for logs only. */
+  resolvedAddress?: string;
 }
 
 /**
@@ -101,7 +106,11 @@ async function lookupHostVerdict(hostname: string, allowPrivateNetworks: boolean
     // resolver-error handling below stays active), but a private answer is the operator's
     // intent and is permitted.
     if (privateAddress && !allowPrivateNetworks) {
-      return { allowed: false, reason: `hostname resolves to private address ${privateAddress.address}` };
+      return {
+        allowed: false,
+        reason: 'hostname resolves to a private or reserved address',
+        resolvedAddress: privateAddress.address,
+      };
     }
     return { allowed: true };
   } catch (error) {
@@ -263,12 +272,13 @@ export async function installRequestGuard(
       }
 
       const reason = verdict.reason ?? 'blocked by request guard';
+      const { resolvedAddress } = verdict;
       if (request.isNavigationRequest() && isMainFrameRequest(request)) {
         recordViolation(url, reason);
-        log.warn('Blocked main-frame navigation to disallowed target', { blockedUrl: url, reason });
+        log.warn('Blocked main-frame navigation to disallowed target', { blockedUrl: url, reason, resolvedAddress });
       } else {
         // Subresource, iframe, or popup navigation - abort the request, keep scanning.
-        log.warn('Blocked non-main request to disallowed target', { blockedUrl: url, reason });
+        log.warn('Blocked non-main request to disallowed target', { blockedUrl: url, reason, resolvedAddress });
       }
       await route.abort('blockedbyclient');
     } catch {
@@ -297,7 +307,11 @@ export async function installRequestGuard(
         if (isMainFrameRequest(request)) {
           recordViolation(url, reason);
         }
-        log.warn('Redirect to disallowed target - closing page', { blockedUrl: url, reason });
+        log.warn('Redirect to disallowed target - closing page', {
+          blockedUrl: url,
+          reason,
+          resolvedAddress: verdict.resolvedAddress,
+        });
 
         let offendingPage: Page | null;
         try {
@@ -325,6 +339,50 @@ export async function installRequestGuard(
       }
     },
   };
+}
+
+/**
+ * Guard every request the BROWSER makes, whichever client opened the page. Lighthouse
+ * connects over the CDP port and audits in a page of its own, outside every context
+ * installRequestGuard covers, so without this the scanned page's JavaScript could reach
+ * any address during the audit. `session` must be a browser-level CDP session: Fetch
+ * interception on the browser target pauses requests from every context, frame, worker,
+ * and service worker, redirect hops included, before they are sent.
+ *
+ * Context routes see each request first, so for capture and annotation pages this repeats
+ * the context guard's check and leaves its violation handling unchanged. Only http(s) is
+ * checked; other schemes never reach the network from a page. WebSocket connections are not
+ * intercepted here either. Install only in the default posture.
+ */
+export async function installBrowserRequestGuard(session: CDPSession, log: Logger): Promise<void> {
+  session.on('Fetch.requestPaused', ({ requestId, request }) => {
+    const url = request.url;
+    const isHttp = url.startsWith('http:') || url.startsWith('https:');
+    const check: Promise<TargetVerdict> = isHttp
+      ? checkRequestTarget(url).catch((error: unknown) => ({
+          allowed: false,
+          reason: `request guard error (${error instanceof Error ? error.message : String(error)})`,
+        }))
+      : Promise.resolve({ allowed: true });
+
+    void check
+      .then(async (verdict) => {
+        if (verdict.allowed) {
+          await session.send('Fetch.continueRequest', { requestId });
+          return;
+        }
+        log.warn('Blocked browser request to disallowed target', {
+          blockedUrl: url,
+          reason: verdict.reason,
+          resolvedAddress: verdict.resolvedAddress,
+        });
+        await session.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' });
+      })
+      .catch(() => {
+        // The request finished or the browser closed while the check ran.
+      });
+  });
+  await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
 }
 
 // --- Node-side connection guard ----------------------------------------------

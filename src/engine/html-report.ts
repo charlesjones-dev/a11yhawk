@@ -33,6 +33,14 @@ const SEVERITY_META: Record<AccessibilityIssue['severity'], { label: string; ran
   low: { label: 'Low', rank: 3 },
 };
 
+/**
+ * The issue's severity if it is a known one, else 'medium'. A stored or hand-built report
+ * can carry any value, and severity is used as a lookup key and a class name.
+ */
+function severityOf(issue: AccessibilityIssue): AccessibilityIssue['severity'] {
+  return Object.hasOwn(SEVERITY_META, issue.severity) ? issue.severity : 'medium';
+}
+
 /** What the scan's checks were, for the scope notes: Lighthouse-only scans have no AI review. */
 function checksLabel(structured: StructuredScanOutput): string {
   return structured.metadata?.engineMode === 'lighthouse-only' ? 'automated checks' : 'automated and AI checks';
@@ -148,7 +156,8 @@ function renderHeader(structured: StructuredScanOutput, title: string, version: 
 
 function renderScorePanel(report: ScanReport): string {
   const structured = report.structured;
-  const score = Math.max(0, Math.min(100, Math.round(structured.overallScore)));
+  const rounded = Math.round(Number(structured.overallScore));
+  const score = Number.isFinite(rounded) ? Math.max(0, Math.min(100, rounded)) : 0;
   const band = scoreBand(score);
   const stats = structured.statistics;
 
@@ -177,7 +186,7 @@ function renderScorePanel(report: ScanReport): string {
               ? stats.mediumIssues
               : stats.lowIssues;
       return `<div class="tile tile-${sev}">
-            <span class="tile-count mono">${count}</span>
+            <span class="tile-count mono">${escapeHtml(count)}</span>
             <span class="tile-label">${SEVERITY_META[sev].label}</span>
           </div>`;
     })
@@ -259,8 +268,9 @@ function renderIssueBody(issue: AccessibilityIssue): string {
 }
 
 function renderIssue(issue: AccessibilityIssue, index: number, coverageName: Map<string, string>): string {
-  const meta = SEVERITY_META[issue.severity];
-  const criterion = issue.wcagCriteria.trim();
+  const severity = severityOf(issue);
+  const meta = SEVERITY_META[severity];
+  const criterion = typeof issue.wcagCriteria === 'string' ? issue.wcagCriteria.trim() : '';
   const name = coverageName.get(criterion);
   const chipText = name && !criterion.includes(name) ? `${criterion} ${name}` : criterion;
   // The level belongs to a criterion; best-practice items without one show no level
@@ -278,7 +288,7 @@ function renderIssue(issue: AccessibilityIssue, index: number, coverageName: Map
       >
         <summary class="issue-summary">
           <span class="chevron" aria-hidden="true"></span>
-          <span class="sev-badge sev-${issue.severity}">${meta.label}</span>
+          <span class="sev-badge sev-${severity}">${meta.label}</span>
           <span class="issue-title">${escapeHtml(issue.title)}</span>
           ${chip}
           <label class="resolve">
@@ -317,7 +327,7 @@ function renderIssues(structured: StructuredScanOutput): string {
   const sorted = structured.issues
     .map((issue, index) => ({ issue, index }))
     .sort((a, b) => {
-      const rankDelta = SEVERITY_META[a.issue.severity].rank - SEVERITY_META[b.issue.severity].rank;
+      const rankDelta = SEVERITY_META[severityOf(a.issue)].rank - SEVERITY_META[severityOf(b.issue)].rank;
       return rankDelta !== 0 ? rankDelta : a.index - b.index;
     });
 
@@ -460,8 +470,16 @@ function renderFooter(report: ScanReport, version: string): string {
  * scripts, and images inline and makes no network requests. Every value drawn
  * from the scanned page is escaped before interpolation.
  */
-export function renderHtmlReport(report: ScanReport, options?: { title?: string }): string {
-  const structured = report.structured;
+export function renderHtmlReport(input: ScanReport, options?: { title?: string }): string {
+  // Reports can come from storage or other code, so tolerate missing arrays.
+  const raw = input.structured;
+  const structured: StructuredScanOutput = {
+    ...raw,
+    issues: Array.isArray(raw.issues) ? raw.issues : [],
+    wcagCoverage: Array.isArray(raw.wcagCoverage) ? raw.wcagCoverage : [],
+    passedChecks: Array.isArray(raw.passedChecks) ? raw.passedChecks : [],
+  };
+  const report: ScanReport = { ...input, structured };
   const version = readVersion();
   const engineMode = report.usage?.modelId ?? 'Lighthouse only';
   const title = options?.title ?? structured.metadata?.pageTitle ?? structured.url;

@@ -17,9 +17,11 @@ import { createLogger, type Logger } from '../logger/index.js';
 import type {
   AccessibilityIssue,
   GenerationParams,
+  PassedCheck,
   ScanHeader,
   ScanUsage,
   StructuredScanOutput,
+  WCAGCoverage,
   WcagLevel,
   WcagVersion,
 } from '../types.js';
@@ -34,7 +36,7 @@ import {
   type LighthouseIssue,
   type LighthouseTransformedResult,
 } from './lighthouse.js';
-import { LLMService } from './llm.js';
+import { LlmRequestError, LLMService } from './llm.js';
 import { generateMarkdownFromStructured } from './markdown-generator.js';
 import { PlaywrightService } from './playwright.js';
 import { buildJsonScanPrompt, findWcagCriterion, getWcagCriteria, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
@@ -198,28 +200,95 @@ const FIX_PRIORITY_FROM_SEVERITY: Record<AccessibilityIssue['severity'], Accessi
   low: 'Low Priority',
 };
 
-/** Fill engine-owned defaults the LLM does not (and should not) produce. */
-function normalizeIssue(issue: Partial<AccessibilityIssue>, index: number): AccessibilityIssue {
+const SEVERITIES: readonly AccessibilityIssue['severity'][] = ['critical', 'high', 'medium', 'low'];
+const WCAG_LEVELS: readonly WcagLevel[] = ['A', 'AA', 'AAA'];
+const FIX_PRIORITIES: readonly AccessibilityIssue['fixPriority'][] = Object.values(FIX_PRIORITY_FROM_SEVERITY);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A non-empty string from model output, or the fallback for anything else. */
+function text(value: unknown, fallback = ''): string {
+  return typeof value === 'string' && value !== '' ? value : fallback;
+}
+
+/** The allowed value `value` matches, ignoring surrounding whitespace and case, else undefined. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  if (typeof value !== 'string') return undefined;
+  const candidate = value.trim().toLowerCase();
+  return allowed.find((option) => option.toLowerCase() === candidate);
+}
+
+/**
+ * Coerce one issue into the result shape and fill engine-owned defaults. Model output is
+ * untrusted: enum fields outside their sets fall back to defaults and non-string text
+ * becomes empty, so renderers and statistics never see unexpected values.
+ */
+function normalizeIssue(issue: { [K in keyof AccessibilityIssue]?: unknown }, index: number): AccessibilityIssue {
+  const severity = oneOf(issue.severity, SEVERITIES) ?? 'medium';
   return {
-    id: issue.id || `issue-${index + 1}`,
-    title: issue.title || 'Untitled issue',
-    severity: issue.severity || 'medium',
-    wcagCriteria: issue.wcagCriteria || '',
-    wcagLevel: issue.wcagLevel || 'A',
-    location: issue.location || '',
-    patternDetected: issue.patternDetected || '',
-    codeContext: issue.codeContext ?? null,
-    impact: issue.impact || '',
-    userImpact: issue.userImpact || '',
-    recommendation: issue.recommendation || '',
-    fixPriority: issue.fixPriority || FIX_PRIORITY_FROM_SEVERITY[issue.severity || 'medium'],
-    remediation: issue.remediation || '',
+    id: text(issue.id, `issue-${index + 1}`),
+    title: text(issue.title, 'Untitled issue'),
+    severity,
+    wcagCriteria: text(issue.wcagCriteria),
+    wcagLevel: oneOf(issue.wcagLevel, WCAG_LEVELS) ?? 'A',
+    location: text(issue.location),
+    patternDetected: text(issue.patternDetected),
+    codeContext: typeof issue.codeContext === 'string' ? issue.codeContext : null,
+    impact: text(issue.impact),
+    userImpact: text(issue.userImpact),
+    recommendation: text(issue.recommendation),
+    fixPriority: oneOf(issue.fixPriority, FIX_PRIORITIES) ?? FIX_PRIORITY_FROM_SEVERITY[severity],
+    remediation: text(issue.remediation),
     resolved: false,
     resolvedAt: null,
     resolvedNote: null,
     resolvedByUserId: null,
     resolvedByDisplayName: null,
   };
+}
+
+/** Coverage rows from model output; rows without a criterion id are dropped. */
+function normalizeCoverage(value: unknown): WCAGCoverage[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).flatMap((row) => {
+    const criteriaId = text(row.criteriaId);
+    if (!criteriaId) return [];
+    const issueIds = Array.isArray(row.issues)
+      ? row.issues.filter((id): id is string => typeof id === 'string')
+      : undefined;
+    return [
+      {
+        criteriaId,
+        name: text(row.name, criteriaId),
+        level: oneOf(row.level, WCAG_LEVELS) ?? 'A',
+        passed: row.passed === true,
+        ...(issueIds ? { issues: issueIds } : {}),
+      },
+    ];
+  });
+}
+
+/**
+ * Metadata from model output: only the typed fields, each kept when it has the right type.
+ * Anything else is dropped, including `engineMode`, which is the engine's to set.
+ */
+function normalizeMetadata(value: Record<string, unknown>): NonNullable<StructuredScanOutput['metadata']> {
+  const { pageTitle, scanDuration, userAgent } = value;
+  return {
+    ...(typeof pageTitle === 'string' ? { pageTitle } : {}),
+    ...(typeof scanDuration === 'number' && Number.isFinite(scanDuration) ? { scanDuration } : {}),
+    ...(typeof userAgent === 'string' ? { userAgent } : {}),
+  };
+}
+
+/** Passed-check entries from model output. */
+function normalizePassedChecks(value: unknown): PassedCheck[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((check) => ({ criteria: text(check.criteria), description: text(check.description) }));
 }
 
 /** Resolved per-scan Lighthouse settings; null when the audit is disabled. */
@@ -474,6 +543,10 @@ export class A11yHawkEngine {
       } else {
         const validation = await validateUrl(url);
         if (!validation.valid) {
+          log.warn('Scan URL failed security validation', {
+            reason: validation.error,
+            resolvedAddress: validation.resolvedAddress,
+          });
           throw new ScanError('invalid-url', `Scan URL failed security validation: ${validation.error}`, false);
         }
       }
@@ -527,14 +600,19 @@ export class A11yHawkEngine {
         try {
           const cdpPort = this.playwright.getCDPPort() ?? undefined;
 
-          // Lighthouse navigates outside the Playwright request guard (it
-          // drives its own browser target), so audit the guard-validated final
-          // URL and re-validate it immediately before the run to narrow the
-          // DNS-rebinding window. Skipped when private networks are allowed.
+          // Lighthouse drives its own page, outside the capture context's
+          // guard; the browser-level guard checks every request it makes. Audit
+          // the guard-validated final URL and re-validate it first, so a target
+          // that now resolves privately fails fast with a clear error. Skipped
+          // when private networks are allowed.
           const lighthouseTarget = pageData.finalUrl || url;
           if (!this.allowPrivateNetworks) {
             const targetValidation = await validateUrl(lighthouseTarget);
             if (!targetValidation.valid) {
+              log.warn('Lighthouse target failed security re-validation', {
+                reason: targetValidation.error,
+                resolvedAddress: targetValidation.resolvedAddress,
+              });
               throw new Error(`Lighthouse target failed security re-validation: ${targetValidation.error}`);
             }
           }
@@ -605,10 +683,12 @@ export class A11yHawkEngine {
           )
           .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : String(error);
-            if (/api key invalid|401|unauthorized/i.test(message)) {
+            // Classified by the endpoint's HTTP status, never by message text.
+            const status = error instanceof LlmRequestError ? error.status : undefined;
+            if (status === 401) {
               throw new ScanError('llm-auth', message, false, { cause: error });
             }
-            if (/rate limit|429/i.test(message)) {
+            if (status === 429) {
               throw new ScanError('llm-rate-limit', message, false, { cause: error });
             }
             throw new ScanError('llm-failed', `LLM analysis failed: ${message}`, true, { cause: error });
@@ -635,7 +715,7 @@ export class A11yHawkEngine {
         }
 
         emit('processing', 'Processing scan results...');
-        structuredData = this.parseStructuredOutput(scanResult.content, lighthouseResult, log);
+        structuredData = this.parseStructuredOutput(scanResult.content, url, lighthouseResult, log);
       } else {
         // Lighthouse-only mode. lighthouseResult is guaranteed here: the audit
         // either succeeded or threw ScanError above.
@@ -714,12 +794,14 @@ export class A11yHawkEngine {
   }
 
   /**
-   * Parse the LLM's JSON response and enforce internal consistency. The LLM
-   * may return an arbitrary score or severity counts; both are recomputed
-   * from the data it actually produced.
+   * Parse the LLM's JSON response into the result shape. The response is untrusted (a
+   * scanned page can steer the model), so nothing is taken on faith: the URL is the one
+   * scanned, the score and statistics are recomputed from the coverage and issues the model
+   * produced, and every field is coerced to its type.
    */
   private parseStructuredOutput(
     content: string,
+    url: string,
     lighthouseResult: LighthouseTransformedResult | null,
     log: Logger,
   ): StructuredScanOutput {
@@ -738,30 +820,37 @@ export class A11yHawkEngine {
       }
       cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
 
-      const structuredData = JSON.parse(cleanJson) as StructuredScanOutput;
-      if (!structuredData.url || !structuredData.issues || !structuredData.statistics) {
+      const raw: unknown = JSON.parse(cleanJson);
+      if (!isRecord(raw) || !raw.url || !Array.isArray(raw.issues) || !raw.statistics) {
         throw new Error('Invalid structured data: missing required fields');
       }
 
-      structuredData.issues = structuredData.issues.map((issue, i) => normalizeIssue(issue, i));
+      const issues = raw.issues.filter(isRecord).map((issue, i) => normalizeIssue(issue, i));
+      const wcagCoverage = normalizeCoverage(raw.wcagCoverage);
 
-      // Recalculate overallScore from wcagCoverage so the score always matches
-      // the share of checked criteria with no issues found.
-      if (structuredData.wcagCoverage && structuredData.wcagCoverage.length > 0) {
-        const passedCriteria = structuredData.wcagCoverage.filter((c) => c.passed).length;
-        structuredData.overallScore = Math.round((passedCriteria / structuredData.wcagCoverage.length) * 100);
-      }
-
-      // Recalculate statistics from the actual issues array.
-      const issues = structuredData.issues;
-      structuredData.statistics = {
-        totalIssues: issues.length,
-        criticalIssues: issues.filter((i) => i.severity === 'critical').length,
-        highIssues: issues.filter((i) => i.severity === 'high').length,
-        mediumIssues: issues.filter((i) => i.severity === 'medium').length,
-        lowIssues: issues.filter((i) => i.severity === 'low').length,
-        resolvedIssues: 0,
-        unresolvedIssues: issues.length,
+      const structuredData: StructuredScanOutput = {
+        // Share of checked criteria with no issues found. With no criteria checked nothing
+        // was verified, so the score is 0, never the model's own number.
+        overallScore:
+          wcagCoverage.length > 0
+            ? Math.round((wcagCoverage.filter((c) => c.passed).length / wcagCoverage.length) * 100)
+            : 0,
+        url,
+        scanDate: text(raw.scanDate, new Date().toISOString()),
+        standard: text(raw.standard),
+        statistics: {
+          totalIssues: issues.length,
+          criticalIssues: issues.filter((i) => i.severity === 'critical').length,
+          highIssues: issues.filter((i) => i.severity === 'high').length,
+          mediumIssues: issues.filter((i) => i.severity === 'medium').length,
+          lowIssues: issues.filter((i) => i.severity === 'low').length,
+          resolvedIssues: 0,
+          unresolvedIssues: issues.length,
+        },
+        wcagCoverage,
+        issues,
+        passedChecks: normalizePassedChecks(raw.passedChecks),
+        ...(isRecord(raw.metadata) ? { metadata: normalizeMetadata(raw.metadata) } : {}),
       };
 
       // Lighthouse criteria for cross-referencing with AI findings.
