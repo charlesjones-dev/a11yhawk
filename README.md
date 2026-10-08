@@ -116,24 +116,24 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 
 **ScanOptions**
 
-| Option                  | Type                               | Default                        | Notes                                                                                        |
-| ----------------------- | ---------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------- |
-| `llm`                   | `ScanLlmOptions`                   | omitted                        | Omit entirely for Lighthouse-only mode                                                       |
-| `llm.apiKey`            | `string`                           | required in LLM mode           | Key for the configured endpoint                                                              |
-| `llm.model`             | `string`                           | `anthropic/claude-sonnet-5`    | Any model id your endpoint accepts                                                           |
-| `llm.baseUrl`           | `string`                           | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint                                                               |
-| `llm.generationParams`  | `GenerationParams`                 | engine defaults                | temperature, topP, frequencyPenalty, maxTokens                                               |
-| `llm.debug`             | `boolean`                          | `false`                        | Verbose prompt/response logging                                                              |
-| `wcagVersion`           | `'2.0' \| '2.1' \| '2.2'`          | `'2.1'`                        |                                                                                              |
-| `wcagLevel`             | `'A' \| 'AA' \| 'AAA'`             | `'AA'`                         |                                                                                              |
-| `headers`               | `ScanHeader[]`                     | none                           | Custom request headers (cookies, auth), sent only to the scan URL's origin; see Security     |
-| `lighthouse`            | `boolean \| ScanLighthouseOptions` | `true`                         | `false` skips the audit (LLM mode only); an object selects categories, see below             |
-| `lighthouse.categories` | `LighthouseCategory[]`             | `['accessibility']`            | `'accessibility' \| 'performance'`; must include `'accessibility'`; one run, one page load   |
-| `lighthouse.includeRaw` | `boolean`                          | `false`                        | Attach the trimmed raw Lighthouse result as `report.lighthouse.raw`                          |
-| `screenshot`            | `boolean`                          | `true`                         | `false` skips screenshot capture entirely (Lighthouse-only mode; see Bulk scanning)          |
-| `annotate`              | `boolean`                          | `true`                         | Draw severity-colored boxes on a copy of the screenshot                                      |
-| `onProgress`            | `(e: ScanProgressEvent) => void`   | none                           | Stages: validating, capturing, auditing, analyzing, processing, annotating, complete, failed |
-| `logger`                | `Logger`                           | console logger                 | Bring your own structured logger                                                             |
+| Option                  | Type                               | Default                        | Notes                                                                                         |
+| ----------------------- | ---------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `llm`                   | `ScanLlmOptions`                   | omitted                        | Omit entirely for Lighthouse-only mode                                                        |
+| `llm.apiKey`            | `string`                           | required in LLM mode           | Key for the configured endpoint                                                               |
+| `llm.model`             | `string`                           | `anthropic/claude-sonnet-5`    | Any model id your endpoint accepts                                                            |
+| `llm.baseUrl`           | `string`                           | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint. Must be a public address unless `allowPrivateNetworks` is set |
+| `llm.generationParams`  | `GenerationParams`                 | engine defaults                | temperature, topP, frequencyPenalty, maxTokens                                                |
+| `llm.debug`             | `boolean`                          | `false`                        | Verbose prompt/response logging                                                               |
+| `wcagVersion`           | `'2.0' \| '2.1' \| '2.2'`          | `'2.1'`                        |                                                                                               |
+| `wcagLevel`             | `'A' \| 'AA' \| 'AAA'`             | `'AA'`                         |                                                                                               |
+| `headers`               | `ScanHeader[]`                     | none                           | Custom request headers (cookies, auth), sent only to the scan URL's origin; see Security      |
+| `lighthouse`            | `boolean \| ScanLighthouseOptions` | `true`                         | `false` skips the audit (LLM mode only); an object selects categories, see below              |
+| `lighthouse.categories` | `LighthouseCategory[]`             | `['accessibility']`            | `'accessibility' \| 'performance'`; must include `'accessibility'`; one run, one page load    |
+| `lighthouse.includeRaw` | `boolean`                          | `false`                        | Attach the trimmed raw Lighthouse result as `report.lighthouse.raw`                           |
+| `screenshot`            | `boolean`                          | `true`                         | `false` skips screenshot capture entirely (Lighthouse-only mode; see Bulk scanning)           |
+| `annotate`              | `boolean`                          | `true`                         | Draw severity-colored boxes on a copy of the screenshot                                       |
+| `onProgress`            | `(e: ScanProgressEvent) => void`   | none                           | Stages: validating, capturing, auditing, analyzing, processing, annotating, complete, failed  |
+| `logger`                | `Logger`                           | console logger                 | Bring your own structured logger                                                              |
 
 **EngineOptions**
 
@@ -282,25 +282,25 @@ The default command scans a single URL and writes `report.json` and `report.md` 
 
 ### Scan options
 
-| Flag                     | Default                         | Description                                                              |
-| ------------------------ | ------------------------------- | ------------------------------------------------------------------------ |
-| `--model <id>`           | `anthropic/claude-sonnet-5`     | LLM model id (env: `A11YHAWK_MODEL`)                                     |
-| `--api-key <key>`        | none                            | LLM API key; presence enables LLM mode (env: `A11YHAWK_API_KEY`)         |
-| `--base-url <url>`       | `https://openrouter.ai/api/v1`  | OpenAI-compatible endpoint (env: `A11YHAWK_BASE_URL`)                    |
-| `--no-llm`               | off                             | Force Lighthouse-only mode even if a key is set                          |
-| `--wcag <2.0\|2.1\|2.2>` | `2.1`                           | WCAG version                                                             |
-| `--level <A\|AA\|AAA>`   | `AA`                            | Conformance level                                                        |
-| `--header "Name: value"` | none                            | Custom request header; repeatable                                        |
-| `--format <list>`        | `json,md`                       | Comma-separated output formats: `json`, `md`, `html`                     |
-| `--output <dir>`         | `./a11yhawk-output/<timestamp>` | Directory for report files and screenshots                               |
-| `--stdout`               | off                             | Print structured JSON to stdout instead of writing files                 |
-| `--open`                 | off                             | Open `report.html` after writing (implies `html` in `--format`)          |
-| `--fail-below <score>`   | none                            | Exit 1 when the overall score is below `<score>` (CI gate)               |
-| `--allow-private`        | off                             | Permit scanning private/internal targets (env: `A11YHAWK_ALLOW_PRIVATE`) |
-| `--no-annotate`          | off                             | Skip screenshot annotation                                               |
-| `--no-lighthouse`        | off                             | Skip the Lighthouse audit (LLM mode only)                                |
-| `--quiet`                | off                             | Errors only                                                              |
-| `--verbose`              | off                             | Debug logging                                                            |
+| Flag                     | Default                         | Description                                                                                |
+| ------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `--model <id>`           | `anthropic/claude-sonnet-5`     | LLM model id (env: `A11YHAWK_MODEL`)                                                       |
+| `--api-key <key>`        | none                            | LLM API key; presence enables LLM mode (env: `A11YHAWK_API_KEY`)                           |
+| `--base-url <url>`       | `https://openrouter.ai/api/v1`  | OpenAI-compatible endpoint; a local one needs `--allow-private` (env: `A11YHAWK_BASE_URL`) |
+| `--no-llm`               | off                             | Force Lighthouse-only mode even if a key is set                                            |
+| `--wcag <2.0\|2.1\|2.2>` | `2.1`                           | WCAG version                                                                               |
+| `--level <A\|AA\|AAA>`   | `AA`                            | Conformance level                                                                          |
+| `--header "Name: value"` | none                            | Custom request header; repeatable                                                          |
+| `--format <list>`        | `json,md`                       | Comma-separated output formats: `json`, `md`, `html`                                       |
+| `--output <dir>`         | `./a11yhawk-output/<timestamp>` | Directory for report files and screenshots                                                 |
+| `--stdout`               | off                             | Print structured JSON to stdout instead of writing files                                   |
+| `--open`                 | off                             | Open `report.html` after writing (implies `html` in `--format`)                            |
+| `--fail-below <score>`   | none                            | Exit 1 when the overall score is below `<score>` (CI gate)                                 |
+| `--allow-private`        | off                             | Permit private/internal scan targets and LLM endpoints (env: `A11YHAWK_ALLOW_PRIVATE`)     |
+| `--no-annotate`          | off                             | Skip screenshot annotation                                                                 |
+| `--no-lighthouse`        | off                             | Skip the Lighthouse audit (LLM mode only)                                                  |
+| `--quiet`                | off                             | Errors only                                                                                |
+| `--verbose`              | off                             | Debug logging                                                                              |
 
 Progress is streamed to stderr as `[stage] message`; report data goes to stdout only under `--stdout`, so `a11yhawk <url> --stdout > report.json` pipes cleanly. `--stdout` writes no files, so it takes precedence over `--open`.
 
@@ -379,12 +379,12 @@ docker compose -f examples/docker-compose.yml up
 
 ### Endpoints
 
-| Method and path              | Description                                                                        |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| `POST /scans`                | Enqueue a scan. Body `{ "url": "...", "options": { ... } }`. Returns `202 { id }`. |
-| `GET /scans/:id`             | Job status, plus the report once completed or an error once failed.                |
-| `GET /scans/:id/report.html` | The rendered HTML report. `404` until the scan completes.                          |
-| `GET /healthz`               | Liveness, uptime, and job counts. Never requires auth.                             |
+| Method and path              | Description                                                                                                                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /scans`                | Enqueue a scan. Body `{ "url": "...", "options": { ... } }`. Returns `202 { id }`, `400` for invalid options (including an `llm.baseUrl` on a private network), or `503` while 100 scans are already waiting. |
+| `GET /scans/:id`             | Job status, plus the report once completed or an error once failed.                                                                                                                                           |
+| `GET /scans/:id/report.html` | The rendered HTML report. `404` until the scan completes.                                                                                                                                                     |
+| `GET /healthz`               | Liveness, uptime, job counts, and the queue limit. Never requires auth.                                                                                                                                       |
 
 Enqueue a scan and poll it to completion:
 
@@ -411,14 +411,14 @@ Every setting is an environment variable, read only by the server layer (never t
 | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
 | `A11YHAWK_PORT` (or `PORT`) | `4000`  | Listen port. `serve --port <n>` overrides both.                                      |
 | `A11YHAWK_AUTH_TOKEN`       | (unset) | When set, every endpoint except `/healthz` requires `Authorization: Bearer <token>`. |
-| `A11YHAWK_CONCURRENCY`      | `2`     | Max concurrent scans (clamped 1-10). Extra scans queue FIFO.                         |
+| `A11YHAWK_CONCURRENCY`      | `2`     | Max concurrent scans (clamped 1-10). Extra scans queue FIFO, up to 100 waiting.      |
 | `A11YHAWK_JOB_TTL_SECONDS`  | `3600`  | How long a finished job is retained before eviction.                                 |
 | `A11YHAWK_ALLOW_PRIVATE`    | `false` | Permit scanning private/internal targets (see the note below).                       |
 | `A11YHAWK_DISABLE_SANDBOX`  | `false` | Launch Chromium with `--no-sandbox`; some container hosts require it.                |
 
 ### Server security note
 
-`allowPrivateNetworks` is a server-level posture, set only by `A11YHAWK_ALLOW_PRIVATE`. A request body can never turn it on: that field, along with `browser` and `logger`, is stripped from submitted options. Leave it off anywhere scan URLs come from people you do not trust, and put network-layer egress rules around the server when it is multi-tenant. See the Security section below for the residual Lighthouse SSRF caveat that applies to every mode.
+`allowPrivateNetworks` is a server-level posture, set only by `A11YHAWK_ALLOW_PRIVATE`. A request body can never turn it on: that field, along with `browser` and `logger`, is stripped from submitted options. Leave it off anywhere scan URLs come from people you do not trust, and put network-layer egress rules around the server when it is multi-tenant. The same posture governs a submitted `llm.baseUrl`: with it off, an endpoint on a private network is rejected with `400`, and every connection to the endpoint is checked again when the scan runs. The provider's error responses are logged, never returned to clients; a failed job reports only the HTTP status. The HTML report is served with a `Content-Security-Policy` that lets only its own script run. See the Security section below for the residual Lighthouse SSRF caveat that applies to every mode.
 
 <!-- SERVE-DOCS:END -->
 
@@ -428,11 +428,12 @@ A11yHawk is designed to be safe to embed in services where scan URLs come from u
 
 - **SSRF request guard, default-on.** Every request the scanned page makes is validated at the browser context level: scheme checks, per-request DNS resolution with no cached allow-verdicts, redirect-hop detection, service workers blocked, private/loopback/link-local targets refused. Scan URLs are re-validated at scan time (not just submission time) to narrow DNS-rebinding windows.
 - **`allowPrivateNetworks: true`** exists because scanning your own internal apps is a primary self-hosting use case. It only widens which resolved addresses the guard accepts; every other protection stays active. Leave it `false` anywhere scan URLs come from people you don't trust.
+- **LLM endpoint guard.** `llm.baseUrl` gets the same SSRF posture as scan targets: unless `allowPrivateNetworks` is set, an endpoint on a private, loopback, or link-local address is refused before the scan starts, and the LLM client refuses any connection (including a redirect hop or a re-resolved hostname) that lands on one. A local endpoint such as Ollama needs `allowPrivateNetworks: true` (CLI: `--allow-private`).
 - **Known residual risk**: Lighthouse drives its own browser navigation, outside the Playwright request guard. The engine re-validates the audit target immediately before the run, but network-layer egress filtering is the only complete mitigation. If you run A11yHawk multi-tenant, put egress rules around it.
 - **Custom headers stay with the target.** Header and bearer-token entries in `headers` are added only to requests whose origin (scheme, host, and port) matches the scan URL, so third-party scripts, CDNs, and analytics on the page never receive them. Subdomains and the `www`/bare variant are different origins, so pass the URL the page finally lands on. Cookie entries (and a `Cookie` header entry) are set as cookies for the scan URL. Residual gap: Playwright re-sends a request's headers on its redirect hops, so a same-origin URL that redirects to another origin still delivers them to the redirect target.
 - **Subprocess hygiene**: the Lighthouse CLI is spawned with `shell: false` and argv arrays; the attacker-controllable URL is never interpreted by a shell.
-- **Key handling**: API keys arrive as options, are never logged, and error messages from the LLM layer are sanitized so keys cannot leak through error chains.
-- **Report output**: everything interpolated into the HTML report is entity-escaped, so a malicious scanned page cannot inject markup or script into its own report.
+- **Key handling**: API keys arrive as options, are never logged, and error messages from the LLM layer are sanitized so keys cannot leak through error chains. An HTTP error from the endpoint is reported by status only; the response body goes to the log.
+- **Report output**: everything interpolated into the HTML report, including provider token counts, is entity-escaped, so a malicious scanned page or provider cannot inject markup or script into the report. Server mode also serves it with a `Content-Security-Policy` that allows only the report's own inline script.
 - **No telemetry.** Nothing is collected, nothing phones home.
 
 Found a vulnerability? Please open a GitHub security advisory rather than a public issue.
@@ -453,7 +454,7 @@ const report = await scan('https://example.com'); // Lighthouse-only, no key nee
 ```
 
 - LLM mode: add `{ llm: { apiKey } }`; key is an OpenRouter key unless `llm.baseUrl` points elsewhere. Expect 1-5+ minutes and provider token costs per scan in LLM mode; Lighthouse-only takes seconds and is free.
-- Scanning localhost or private hosts requires `{ allowPrivateNetworks: true }`.
+- Scanning localhost or private hosts, or using a local `llm.baseUrl` (Ollama, LM Studio), requires `{ allowPrivateNetworks: true }`.
 - All failures are `ScanError` with `.code` (see table above) and `.retryable`. Non-retryable codes will fail identically on retry; do not loop on them.
 - CI gating pattern: run a scan, compare `report.structured.overallScore` to your threshold, exit non-zero below it. Or use the CLI's built-in gate: `npx a11yhawk <url> --fail-below 80`.
 - Shelling out instead of importing: `npx a11yhawk <url> --stdout` prints the structured JSON to stdout (progress goes to stderr). Exit codes: 0 success, 1 below `--fail-below`, 2 scan error, 3 configuration error. `npx a11yhawk doctor` preflights the environment.

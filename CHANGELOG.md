@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.4.0] - 2026-10-08
+
+This release contains breaking behavior changes. No exported function, option name, error code, or result type changed shape, but an `llm.baseUrl` on a private network is now refused, LLM error messages changed, and the server can answer `503`. Read Breaking changes before upgrading.
+
+### Breaking changes
+
+- **`llm.baseUrl` must be a public address unless private networks are allowed.** An endpoint on a private, loopback, or link-local address, such as a local Ollama at `http://localhost:11434/v1`, now fails the scan with a non-retryable `invalid-options` error before any browser work, and the LLM client refuses any connection, redirect hop included, that lands on one. To use a local endpoint, set `allowPrivateNetworks: true` (CLI `--allow-private`, server `A11YHAWK_ALLOW_PRIVATE=true`); that also permits private scan targets. The default OpenRouter endpoint is unaffected.
+- **LLM HTTP errors report the status only.** A non-2xx reply other than 401 or 429 now fails with `LLM request failed with HTTP <status>.` instead of the provider's message, which is still logged. The 401 and 429 messages are unchanged. Code that matched provider error text in `ScanError.message` needs updating.
+- **Server: `POST /scans` can answer `400` for `llm.baseUrl` and `503` when full.** A submitted `llm.baseUrl` on a private network is rejected with `400 invalid-request` unless the server sets `A11YHAWK_ALLOW_PRIVATE`. Once 100 scans are waiting, new submissions get `503 queue-full` until the queue drains.
+
+### Security
+
+- **The LLM endpoint could be pointed at internal services.** `llm.baseUrl` reached the OpenAI SDK unchecked, and server mode accepts it from request bodies, so any client of `a11yhawk serve` (unauthenticated unless `A11YHAWK_AUTH_TOKEN` is set) could make the server POST to any internal host, port, and path with a bearer token of its choosing, then read non-2xx response bodies back through `GET /scans/:id`. The endpoint now gets the scan target's SSRF posture at submission, at scan start, and on every connection, and provider error bodies are no longer returned.
+- **Stored XSS in the HTML report through provider token counts.** `usage.promptTokens`, `completionTokens`, and `totalTokens` were copied from the provider response without a type check and rendered without escaping, so an endpoint that replied with a string ran script in the report, including on the server's origin. Usage counters are now numbers only (anything else becomes `0`, or is omitted for the optional cached and reasoning counts), the report escapes them, and the server sends `report.html` with a `Content-Security-Policy` that lets only the report's own inline script run, plus `X-Content-Type-Options: nosniff`.
+- **HTML sanitizing could stall the process.** Several `sanitizeHtml` patterns took quadratic time on page-controlled input: 50 KB of whitespace took about three minutes, and raw text full of unclosed `<script>`, `<!--`, or `<title>` openers took seconds per few hundred KB. Each run blocked the event loop for every concurrent scan and, in server mode, the HTTP listener. Every pattern now runs in linear time, and the output is unchanged. LLM mode only; Lighthouse-only scans never sanitize HTML.
+- **The server's job queue was unbounded.** Queued jobs are never swept, so a client could submit scans faster than they ran and grow memory without limit. The queue now holds at most 100 waiting scans, and `/healthz` reports the limit as `queueLimit`.
+
 ## [0.3.0] - 2026-10-06
 
 This release contains breaking behavior changes. No exported function, option name, error code, or result type changed shape (`StructuredScanOutput` and the other result types only gained doc comments), but custom header handling, report text, and some structured data values changed in ways existing integrations can notice. Read Breaking changes before upgrading.
