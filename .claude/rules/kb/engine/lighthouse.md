@@ -1,10 +1,10 @@
 ---
+paths:
+  - 'src/engine/lighthouse.ts'
+  - 'src/engine/scan.ts'
 tags: [lighthouse, performance, bulk-mode]
-related: []
 created: 2026-07-29
 last-updated: 2026-07-29
-pinned: false
-scope: ['src/engine/lighthouse.ts', 'src/engine/scan.ts']
 ---
 
 # Lighthouse Stage & Bulk Mode

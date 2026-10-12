@@ -1,10 +1,11 @@
 ---
+paths:
+  - 'src/engine/llm.ts'
+  - 'src/engine/llm*.test.ts'
+  - 'src/engine/request-guard.ts'
 tags: [llm, anthropic, openrouter, sdk, ssrf, pricing]
-related: [[vitest]], [[dependency-audit]]
 created: 2026-10-08
 last-updated: 2026-10-08
-pinned: false
-scope: ['src/engine/llm.ts', 'src/engine/llm*.test.ts', 'src/engine/request-guard.ts']
 ---
 
 # LLM Providers
@@ -29,5 +30,5 @@ How the LLM stage's two providers (OpenRouter via the OpenAI SDK, Anthropic via 
 
 ## Related
 
-- [[vitest]]
-- [[dependency-audit]]
+- `.claude/rules/kb/tools/vitest.md`
+- `.claude/rules/kb/tools/dependency-audit.md`

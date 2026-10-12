@@ -23,7 +23,7 @@ A11yHawk is a self-hostable web accessibility scan engine: Playwright page captu
 
 It was extracted from the private `accesshawk-nuxt` monorepo's worker (expected as a sibling checkout at `../accesshawk-nuxt`); this repo is now the source of truth for the pipeline, and the AccessHawk worker will eventually consume this package. That drives a hard compatibility contract: the result interfaces in `src/types.ts` (`StructuredScanOutput`, `AccessibilityIssue`, etc.) are intentionally shape-identical to AccessHawk's persisted scan format. Keep changes to them additive.
 
-`docs/` is deliberately gitignored except for `docs/kb/` (`.gitignore`: `docs/*` then `!docs/kb/`). The ignored part holds local planning docs (including the AccessHawk integration prompt) that reference the private monorepo and must not be published; `docs/kb/` is the tracked knowledge base and is committed normally. Never put private-monorepo details in `docs/kb/`.
+`docs/` is deliberately gitignored (`.gitignore`: `docs/*`). It holds local planning docs (including the AccessHawk integration prompt) that reference the private monorepo and must not be published. The tracked knowledge base lives in `.claude/rules/kb/` and `.claude/kb/` and is committed normally. Never put private-monorepo details there.
 
 ## Architecture
 
@@ -84,36 +84,6 @@ Follow SOLID, DRY, KISS, and YAGNI in all code changes:
 
 - Only implement what is requested or on the README roadmap when scheduled. Suggesting extras is fine; ask before building them.
 - Do not add options without a real consumer (a per-scan `timeouts` option was deliberately cut from v1 for exactly this reason).
-
-## Knowledge Base
-
-Topic-specific knowledge is stored in `docs/kb/` and loaded contextually based on the table below.
-
-**How to use the "When to Load" column:**
-
-1. **Pinned entries** (`Always (pinned)`): Load at the start of every conversation.
-2. **Scope patterns** (backtick-wrapped globs like `src/api/**`): Load when the files you are editing or creating match any of the listed glob patterns.
-3. **Keywords** (after the `—` dash): Load when the current task involves these topics, even if no file path matches.
-4. **When uncertain**: Read `docs/kb/_index.md` (pinned) for article summaries and scope patterns to help decide.
-
-**Loading notifications**: When you load a KB file, briefly notify the user so they know what context is being applied. Example: `📖 Loading KB: api-conventions.md`. Keep notifications to a single line per file.
-
-When a KB file's frontmatter contains `related: [[other-file]]` cross-references, also read the related file(s) for full context.
-
-| Topic                 | File                                     | When to Load                                                                                                                   |
-| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Dependency Audits     | docs/kb/tools/dependency-audit.md        | `package.json`, `package-lock.json` — audit, vulnerabilities, dependencies, security, versioning                               |
-| GitHub Actions        | docs/kb/tools/github-actions.md          | `.github/workflows/**` — ci, actions, debugging                                                                                |
-| Global Learnings      | docs/kb/_global-learnings.md             | Always (pinned)                                                                                                                |
-| KB Index              | docs/kb/_index.md                        | Always (pinned)                                                                                                                |
-| Lighthouse Engine     | docs/kb/engine/lighthouse.md             | `src/engine/lighthouse.ts`, `src/engine/scan.ts` — lighthouse, performance, bulk-mode                                          |
-| LLM Providers         | docs/kb/engine/llm-providers.md          | `src/engine/llm.ts`, `src/engine/llm*.test.ts`, `src/engine/request-guard.ts` — llm, anthropic, openrouter, sdk, ssrf, pricing |
-| Releases & Publishing | docs/kb/tools/releases-and-publishing.md | `.github/workflows/**`, `Dockerfile` — release, publish, npm, ghcr, versioning                                                 |
-| Vitest                | docs/kb/tools/vitest.md                  | `**/*.test.ts`, `vitest.config.ts` — testing, vitest, soak                                                                     |
-
-<!-- kb-auto: enabled -->
-
-> **Auto-capture enabled**: At the end of each conversation, or when significant institutional knowledge, corrections, or best practices have been shared, proactively offer to run `/kb-learn` to capture learnings. Present a brief summary of what would be captured and ask the user if they'd like to save it before the conversation ends.
 
 ## PR and Commit Hygiene
 

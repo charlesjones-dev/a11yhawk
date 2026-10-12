@@ -1,10 +1,10 @@
 ---
+paths:
+  - '**/*.test.ts'
+  - 'vitest.config.ts'
 tags: [testing, vitest, soak]
-related: [[llm-providers]]
 created: 2026-07-29
 last-updated: 2026-10-08
-pinned: false
-scope: ['**/*.test.ts', 'vitest.config.ts']
 ---
 
 # Vitest
@@ -20,4 +20,4 @@ Gotchas and patterns for this repo's Vitest (v4) test suite, including the opt-i
 
 ## Related
 
-- [[llm-providers]]
+- `.claude/rules/kb/engine/llm-providers.md`

@@ -1,10 +1,11 @@
 ---
-tags: [release, npm, publishing, ghcr, versioning]
-related: [[github-actions]], [[dependency-audit]]
+paths:
+  - '.github/workflows/**'
+  - 'Dockerfile'
+  - 'CHANGELOG.md'
+tags: [release, npm, publishing, ghcr, versioning, publish]
 created: 2026-07-20
 last-updated: 2026-10-08
-pinned: false
-scope: ['.github/workflows/**', 'Dockerfile', 'CHANGELOG.md']
 ---
 
 # Releases and Publishing
@@ -21,5 +22,5 @@ Operational lessons for publishing a11yhawk to npm and GHCR, learned during the 
 
 ## Related
 
-- [[github-actions]]
-- [[dependency-audit]]
+- `.claude/rules/kb/tools/github-actions.md`
+- `.claude/rules/kb/tools/dependency-audit.md`

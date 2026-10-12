@@ -1,10 +1,9 @@
 ---
-tags: [ci, github-actions, debugging]
-related: [[releases-and-publishing]]
+paths:
+  - '.github/workflows/**'
+tags: [ci, github-actions, debugging, actions]
 created: 2026-07-20
 last-updated: 2026-07-20
-pinned: false
-scope: ['.github/workflows/**']
 ---
 
 # GitHub Actions Debugging
@@ -19,4 +18,4 @@ Lessons from debugging this repo's first CI runs, which happened to coincide wit
 
 ## Related
 
-- [[releases-and-publishing]]
+- `.claude/rules/kb/tools/releases-and-publishing.md`
