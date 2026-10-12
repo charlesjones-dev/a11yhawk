@@ -1,9 +1,7 @@
 ---
 tags: [global, cross-cutting]
-related: []
 created: 2026-07-20
 last-updated: 2026-10-08
-pinned: true
 ---
 
 # Global Learnings

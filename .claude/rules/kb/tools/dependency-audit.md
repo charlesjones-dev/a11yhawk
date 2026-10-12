@@ -1,10 +1,10 @@
 ---
-tags: [dependencies, security, npm-audit, versioning]
-related: [[releases-and-publishing]], [[llm-providers]]
+paths:
+  - 'package.json'
+  - 'package-lock.json'
+tags: [dependencies, security, npm-audit, versioning, audit, vulnerabilities]
 created: 2026-07-20
 last-updated: 2026-10-08
-pinned: false
-scope: ['package.json', 'package-lock.json']
 ---
 
 # Dependency Audits
@@ -19,9 +19,9 @@ Accepted `npm audit` findings and rules for handling them in this repo.
 - Do not add an npm `overrides` entry forcing a newer `@sentry/node`: it jumps a major version against Lighthouse's declared range, untested.
 - Pick runtime dependency ranges whose lowest version is at least 3 days old (check `npm view <pkg> time`), since consumers may enforce a minimum release age; use a newer one only when the user approves it. A caret range on 0.x pins the minor (`^0.131.0` is 0.131.x only).
 - Before adding a runtime dependency, count its transitive packages with a throwaway install (`npm install <pkg> --ignore-scripts` in a temp dir, then `npm ls --all`) and justify it in the PR and CHANGELOG: a low dependency count is a product feature here.
-- Before bumping `@anthropic-ai/sdk`, read `node_modules/@anthropic-ai/sdk/CHANGELOG.md` and re-check the SDK internals the engine relies on (see [[llm-providers]]).
+- Before bumping `@anthropic-ai/sdk`, read `node_modules/@anthropic-ai/sdk/CHANGELOG.md` and re-check the SDK internals the engine relies on (see `.claude/rules/kb/engine/llm-providers.md`).
 
 ## Related
 
-- [[releases-and-publishing]]
-- [[llm-providers]]
+- `.claude/rules/kb/tools/releases-and-publishing.md`
+- `.claude/rules/kb/engine/llm-providers.md`

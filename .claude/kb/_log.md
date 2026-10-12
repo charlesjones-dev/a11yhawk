@@ -1,7 +1,7 @@
 ---
 tags: [log, meta]
 created: 2026-07-20
-last-updated: 2026-10-08
+last-updated: 2026-10-12
 ---
 
 # Knowledge Base Log
@@ -9,27 +9,38 @@ last-updated: 2026-10-08
 Chronological record of KB operations. Append-only — newest entries at the bottom.
 
 ## [2026-07-20] init | Knowledge Base initialized
+
 - Created `docs/kb/` directory structure
 - Created `_global-learnings.md`, `_index.md`, `_log.md`
 - Added Knowledge Base section to CLAUDE.md
 
-
 ## [2026-07-20] learn | Conversation learnings captured
+
 - Created: `tools/releases-and-publishing.md`, `tools/github-actions.md`
 - Updated: `_global-learnings.md` (2 rules), `_index.md`, CLAUDE.md KB table
 - Global learnings: 2 added (zsh `status` reserved variable; exit codes vs piped output)
 
 ## [2026-07-20] learn | Preflight/CI session learnings captured
+
 - Created: `tools/dependency-audit.md`
 - Updated: `_global-learnings.md` (1 rule), `_index.md`, CLAUDE.md KB table, `tools/releases-and-publishing.md` (cross-ref)
 - Global learnings: 1 added (Prettier format:check gates all markdown incl. CLAUDE.md)
 
 ## [2026-07-29] learn | v0.2.0 bulk-mode feature session learnings captured
+
 - Created: `engine/lighthouse.md`, `tools/vitest.md`
 - Updated: `_index.md`, CLAUDE.md KB table
 - Global learnings: 0 added (both learnings are scoped, not cross-cutting)
 
 ## [2026-10-08] learn | v0.7.0 Anthropic provider session learnings captured
+
 - Created: `engine/llm-providers.md`
 - Updated: `tools/dependency-audit.md` (3 rules, cross-ref), `tools/vitest.md` (cross-ref), `_global-learnings.md` (2 rules), `_index.md`, CLAUDE.md KB table
 - Global learnings: 2 added (no `timeout` on macOS; non-interactive partial staging and isolated verification)
+
+## [2026-10-12] migrate | Moved the 1.x knowledge base to Claude Code rules
+
+- Pinned: 1, scoped: 6, on-demand: 0
+- Removed the Knowledge Base section and the kb-auto block from CLAUDE.md
+- Added the AGENTS.md pointer
+- Frontmatter fixes: 7; links turned into paths: 9; command references updated: 0
