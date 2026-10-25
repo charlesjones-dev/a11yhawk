@@ -13,6 +13,13 @@
 # dependency tree; the runtime stage carries only production dependencies and
 # the compiled output, and runs as the image's non-root pwuser with the
 # Chromium sandbox left enabled.
+#
+# The sandbox needs user namespaces, and Docker's default seccomp profile blocks
+# them, so Chromium stops with "No usable sandbox!". Run the image with
+# `--security-opt seccomp=docker/seccomp-chromium.json`. That profile is
+# Docker's default plus user, PID and network namespaces. Keep Docker's default
+# AppArmor profile. On Ubuntu hosts, `apparmor=unconfined` blocks the namespaces
+# again. A11YHAWK_DISABLE_SANDBOX=true turns the sandbox off instead.
 
 # ---- build stage ------------------------------------------------------------
 FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea AS build

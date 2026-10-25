@@ -262,9 +262,9 @@ function countA11yElements(node: A11yNode | null): { total: number; images: numb
 
 export interface PlaywrightServiceOptions {
   /**
-   * Launch Chromium with --no-sandbox / --disable-setuid-sandbox. Only for containerized
-   * environments that restrict kernel namespaces; a critical security risk otherwise.
-   * Default false.
+   * Launch Chromium with --no-sandbox / --disable-setuid-sandbox. Only for hosts that can't
+   * give Chromium user namespaces (a container under Docker's default seccomp profile, for
+   * example); a critical security risk otherwise. Default false.
    */
   disableSandbox?: boolean;
   /**
@@ -354,9 +354,10 @@ export class PlaywrightService {
         '--remote-debugging-address=127.0.0.1',
       ];
 
-      // SECURITY NOTE: --no-sandbox is a critical security risk but may be required
-      // in containerized environments like Railway that restrict kernel namespaces.
-      // Only enable if deployment requires it. Consider these compensating controls:
+      // SECURITY NOTE: --no-sandbox is a critical security risk. Chromium's sandbox
+      // needs user namespaces, which some hosts don't allow: Docker's default seccomp
+      // profile blocks them (docker/seccomp-chromium.json allows them). Only disable it
+      // where the host leaves no choice. Compensating controls:
       // 1. Network isolation for browser process
       // 2. Strict URL validation (see url-validator.ts)
       // 3. Resource limits and timeouts (implemented below)
@@ -368,6 +369,9 @@ export class PlaywrightService {
       log.info('Launching browser server', { cdpPort: this.cdpPort });
       this.browserServer = await chromium.launchServer({
         headless: true,
+        // Playwright adds --no-sandbox unless this is true, so the sandbox is only on
+        // when we ask for it.
+        chromiumSandbox: !this.disableSandbox,
         args,
         timeout: 30000, // 30 second timeout for browser launch
       });

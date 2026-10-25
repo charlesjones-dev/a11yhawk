@@ -3,3 +3,5 @@ coverage/
 node_modules/
 package-lock.json
 docs/
+# Byte-for-byte the profile that was tested; reformatting would change its checksum.
+docker/seccomp-chromium.json

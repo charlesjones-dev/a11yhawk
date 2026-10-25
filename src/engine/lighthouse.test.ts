@@ -159,6 +159,21 @@ describe('buildLighthouseCliArgs', () => {
     expect(args.some((a) => a.startsWith('--chrome-flags='))).toBe(true);
     expect(args.some((a) => a.startsWith('--port='))).toBe(false);
   });
+
+  it("keeps the sandbox on in Lighthouse's own Chrome unless it is disabled", () => {
+    const chromeFlags = (disableSandbox?: boolean) =>
+      buildLighthouseCliArgs('https://example.com/', ['accessibility'], undefined, disableSandbox)
+        .find((a) => a.startsWith('--chrome-flags='))
+        ?.split(' ');
+    expect(chromeFlags()).not.toContain('--no-sandbox');
+    expect(chromeFlags(false)).not.toContain('--no-sandbox');
+    expect(chromeFlags(true)).toContain('--no-sandbox');
+  });
+
+  it('never passes Chrome flags when it reuses the browser over CDP', () => {
+    const args = buildLighthouseCliArgs('https://example.com/', ['accessibility'], 9222, true);
+    expect(args.some((a) => a.startsWith('--chrome-flags='))).toBe(false);
+  });
 });
 
 function makePerfLhr(): Record<string, unknown> {
