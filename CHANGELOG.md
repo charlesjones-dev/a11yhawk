@@ -12,7 +12,7 @@ This release turns on the Chromium sandbox, which earlier versions meant to use 
 
 ### Breaking changes
 
-- **Chromium's sandbox is on.** A container that runs under Docker's default seccomp profile now fails to start Chromium, and the scan fails with `No usable sandbox!` in Chromium's log. Run the container with `--security-opt seccomp=docker/seccomp-chromium.json`, or set `browser.disableSandbox` (`A11YHAWK_DISABLE_SANDBOX=true`) to keep the old behavior. Ubuntu 23.10 and later block the sandbox outside containers too. See [Chromium sandbox](README.md#chromium-sandbox).
+- **Chromium's sandbox is on.** A container that runs under Docker's default seccomp profile now fails to start Chromium, and the scan fails with `No usable sandbox!` in Chromium's log. Run the container with `--security-opt seccomp=docker/seccomp-chromium.json`, or set `browser.disableSandbox` (`A11YHAWK_DISABLE_SANDBOX=true`) to keep the old behavior. Ubuntu 23.10 and later block the sandbox outside containers too, and that includes GitHub Actions' Ubuntu runners: add `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` to the job, as the README's CI example now does. See [Chromium sandbox](README.md#chromium-sandbox).
 
 ### Security
 

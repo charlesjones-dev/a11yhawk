@@ -28,6 +28,13 @@ jobs:
       - name: Install Chromium for browser regression tests
         if: matrix.node == 24
         run: npx playwright install --with-deps chromium-headless-shell
+      - name: Let Chromium's sandbox create user namespaces
+        # Ubuntu 23.10 and later block user namespaces for programs with no
+        # AppArmor profile of their own, and Playwright's Chromium has none. The
+        # sandbox is on since 0.8.0, so without this Chromium stops with
+        # "No usable sandbox!". The runner is a throwaway VM.
+        if: matrix.node == 24
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Test browser connection after long uptime
         if: matrix.node == 24
         run: A11YHAWK_BROWSER_TEST=1 npx vitest run src/engine/playwright.integration.test.ts

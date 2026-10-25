@@ -379,6 +379,8 @@ jobs:
         with:
           node-version: 20
       - run: npx playwright@1.64.1 install --with-deps chromium
+      # Ubuntu runners block the user namespaces that Chromium's sandbox needs.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Accessibility gate
         run: npx a11yhawk https://your-site.example --fail-below 90 --format json,html --output a11y-report
       - if: always()
@@ -485,7 +487,7 @@ Chromium runs with its sandbox on. A page that exploits a renderer bug is still 
 On Linux, the sandbox needs user namespaces. When Chromium can't create them, the scan fails and Chromium logs `No usable sandbox!`. Two common setups block them:
 
 - **Docker's default seccomp profile.** Run the container with `--security-opt seccomp=docker/seccomp-chromium.json` from this repository. That file is Docker's default profile with two added rules: `clone` may create user, PID and network namespaces, and `unshare` may create a user namespace. Mount, UTS, IPC, cgroup and time namespaces stay blocked. Keep Docker's default AppArmor profile. On Ubuntu hosts, `apparmor=unconfined` blocks the namespaces again. `examples/docker-compose.yml` already sets the profile.
-- **Ubuntu 23.10 and later, outside a container.** AppArmor blocks user namespaces for programs that have no AppArmor profile of their own, and Playwright's downloaded Chromium has none. Chromium's [AppArmor notes](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) describe the options.
+- **Ubuntu 23.10 and later, outside a container.** AppArmor blocks user namespaces for programs that have no AppArmor profile of their own, and Playwright's downloaded Chromium has none. This includes GitHub Actions' Ubuntu runners. On a throwaway CI runner, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` lifts the restriction, as the CI example above does. On a long-lived machine, give Chromium its own AppArmor profile instead. Chromium's [AppArmor notes](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) describe the options.
 
 `browser.disableSandbox` (CLI and server: `A11YHAWK_DISABLE_SANDBOX=true`) turns the sandbox off. Use it only where the host leaves no other choice, and put the network controls above around the scanner.
 
