@@ -196,14 +196,12 @@ export class LighthouseAuditError extends Error {
 }
 
 // Chrome flags for when Lighthouse launches its own Chrome (no CDP port),
-// optimized for containerized environments (Railway, Docker). These reduce
-// memory usage and prevent "Browser tab has unexpectedly crashed" errors.
-// Note: --no-sandbox is required on Railway as it doesn't support user
-// namespaces. Security is mitigated by: non-root user, container isolation,
-// ephemeral containers.
+// optimized for containerized environments. These reduce memory usage and
+// prevent "Browser tab has unexpectedly crashed" errors. --no-sandbox is not
+// here: buildLighthouseCliArgs adds it only when the engine disables the
+// sandbox, the same rule as the Playwright browser.
 const CONTAINER_CHROME_FLAGS = [
   '--headless=new',
-  '--no-sandbox',
   '--disable-gpu',
   '--disable-dev-shm-usage',
   // Memory optimization
@@ -240,6 +238,7 @@ export function buildLighthouseCliArgs(
   url: string,
   categories: readonly LighthouseCategory[],
   cdpPort?: number,
+  disableSandbox = false,
 ): string[] {
   const args = [
     url,
@@ -256,7 +255,8 @@ export function buildLighthouseCliArgs(
     // Chrome. This saves memory by reusing the browser instance.
     args.push(`--port=${cdpPort}`);
   } else {
-    args.push(`--chrome-flags=${CONTAINER_CHROME_FLAGS.join(' ')}`);
+    const chromeFlags = disableSandbox ? [...CONTAINER_CHROME_FLAGS, '--no-sandbox'] : CONTAINER_CHROME_FLAGS;
+    args.push(`--chrome-flags=${chromeFlags.join(' ')}`);
   }
   return args;
 }
@@ -292,6 +292,11 @@ export function buildLighthouseEnv(parentEnv: NodeJS.ProcessEnv, chromePath: str
 export interface LighthouseRunOptions {
   /** CDP port of an already-running Chromium to reuse (from PlaywrightService). */
   cdpPort?: number;
+  /**
+   * Launch Lighthouse's own Chrome with --no-sandbox. Used only without a CDP port;
+   * follows the engine's `browser.disableSandbox`. Default false.
+   */
+  disableSandbox?: boolean;
   /**
    * Categories to audit in the single subprocess run. Must include
    * 'accessibility'. Default ['accessibility'].
@@ -332,7 +337,7 @@ export class LighthouseService {
    * run / one page load.
    *
    * @param url - The URL to audit
-   * @param options - CDP port, categories, raw-result opt-in
+   * @param options - CDP port, categories, raw-result opt-in, sandbox opt-out
    * @param jobLogger - Optional logger for job-specific logging
    * @returns Lighthouse audit result (accessibility always present;
    *   `performance` set when that category was requested)
@@ -401,7 +406,7 @@ export class LighthouseService {
     log.debug('Running Lighthouse CLI', { node: process.execPath, cli: lighthouseCli, chromePath, cdpPort });
 
     const lhr = await new Promise<Record<string, unknown>>((resolvePromise, reject) => {
-      const args = buildLighthouseCliArgs(url, categories, cdpPort);
+      const args = buildLighthouseCliArgs(url, categories, cdpPort, options.disableSandbox);
       if (cdpPort) {
         log.debug('Connecting to existing Chrome via CDP', { cdpPort });
       }

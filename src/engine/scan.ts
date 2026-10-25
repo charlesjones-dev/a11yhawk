@@ -196,7 +196,10 @@ export interface EngineOptions {
    */
   allowPrivateNetworks?: boolean;
   browser?: {
-    /** Launch Chromium with --no-sandbox (required on some container hosts). */
+    /**
+     * Launch Chromium with --no-sandbox. The sandbox needs user namespaces, which some
+     * container hosts block (Docker's default seccomp profile does). Default false.
+     */
     disableSandbox?: boolean;
     debug?: boolean;
   };
@@ -535,13 +538,15 @@ export class A11yHawkEngine {
   private readonly playwright: PlaywrightService;
   private readonly logger: Logger;
   private readonly allowPrivateNetworks: boolean;
+  private readonly disableSandbox: boolean;
 
   constructor(options: EngineOptions = {}) {
     this.allowPrivateNetworks = options.allowPrivateNetworks ?? false;
+    this.disableSandbox = options.browser?.disableSandbox ?? false;
     this.logger = options.logger ?? createLogger();
     this.playwright = new PlaywrightService({
       allowPrivateNetworks: this.allowPrivateNetworks,
-      disableSandbox: options.browser?.disableSandbox ?? false,
+      disableSandbox: this.disableSandbox,
       debug: options.browser?.debug ?? false,
     });
   }
@@ -696,7 +701,12 @@ export class A11yHawkEngine {
 
           const rawResult = await lighthouseService.runAudit(
             lighthouseTarget,
-            { cdpPort, categories: lighthouseConfig.categories, includeRaw: lighthouseConfig.includeRaw },
+            {
+              cdpPort,
+              disableSandbox: this.disableSandbox,
+              categories: lighthouseConfig.categories,
+              includeRaw: lighthouseConfig.includeRaw,
+            },
             log,
           );
           lighthouseResult = transformLighthouseToIssues(rawResult);

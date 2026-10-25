@@ -44,7 +44,7 @@ Runs entirely on your own infrastructure. No accounts, no telemetry, no phone-ho
 ## Requirements
 
 - Node.js >= 20 (ESM-only package; use `import`)
-- Chromium for Playwright (one-time): `npx playwright install chromium` from a project with a11yhawk installed, or `npx playwright@1.57.0 install chromium` from anywhere else (browser downloads are pinned per Playwright version, and an unpinned `npx playwright` outside a project resolves the registry's latest)
+- Chromium for Playwright (one-time): `npx playwright install chromium` from a project with a11yhawk installed, or `npx playwright@1.64.1 install chromium` from anywhere else (browser downloads are pinned per Playwright version, and an unpinned `npx playwright` outside a project resolves the registry's latest)
 - For LLM mode: an API key for [OpenRouter](https://openrouter.ai/) or any OpenAI-compatible endpoint, or an Anthropic API key to call the Claude API directly (see [Anthropic provider](#anthropic-provider)). You bring your own key and pay your own token costs; A11yHawk adds nothing on top.
 
 ## Install
@@ -140,12 +140,12 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 
 **EngineOptions**
 
-| Option                   | Type      | Default        | Notes                                                   |
-| ------------------------ | --------- | -------------- | ------------------------------------------------------- |
-| `allowPrivateNetworks`   | `boolean` | `false`        | See [Security](#security) before enabling               |
-| `browser.disableSandbox` | `boolean` | `false`        | Chromium `--no-sandbox`, needed on some container hosts |
-| `browser.debug`          | `boolean` | `false`        | Extra capture diagnostics                               |
-| `logger`                 | `Logger`  | console logger |                                                         |
+| Option                   | Type      | Default        | Notes                                                                    |
+| ------------------------ | --------- | -------------- | ------------------------------------------------------------------------ |
+| `allowPrivateNetworks`   | `boolean` | `false`        | See [Security](#security) before enabling                                |
+| `browser.disableSandbox` | `boolean` | `false`        | Chromium `--no-sandbox`. See [Chromium sandbox](#chromium-sandbox) first |
+| `browser.debug`          | `boolean` | `false`        | Extra capture diagnostics                                                |
+| `logger`                 | `Logger`  | console logger |                                                                          |
 
 **ScanReport**
 
@@ -298,7 +298,7 @@ npx a11yhawk https://example.com --provider anthropic --api-key sk-ant-...
 # The version pin matters here: outside a project, an unpinned `npx playwright`
 # resolves the registry's latest, whose browser builds a11yhawk cannot use.
 # `npx a11yhawk doctor` prints the exact command when Chromium is missing.
-npx playwright@1.57.0 install chromium
+npx playwright@1.64.1 install chromium
 ```
 
 The default command scans a single URL and writes `report.json` and `report.md` (add `html` for the self-contained HTML report), plus `screenshot.jpg` and `annotated.jpg` when available. LLM mode turns on automatically when an API key is present (flag or env) and `--no-llm` is absent; otherwise the scan runs Lighthouse-only, which needs no key and finishes in seconds.
@@ -342,14 +342,14 @@ Progress is streamed to stderr as `[stage] message`; report data goes to stdout 
 
 The CLI reads these as fallbacks; an explicit flag always wins. The library itself never reads the environment.
 
-| Variable                   | Equivalent flag   | Notes                                                                       |
-| -------------------------- | ----------------- | --------------------------------------------------------------------------- |
-| `A11YHAWK_API_KEY`         | `--api-key`       | Enables LLM mode when set                                                   |
-| `A11YHAWK_PROVIDER`        | `--provider`      | `openrouter` or `anthropic`; checked only in LLM mode                       |
-| `A11YHAWK_MODEL`           | `--model`         | LLM model id                                                                |
-| `A11YHAWK_BASE_URL`        | `--base-url`      | Provider endpoint                                                           |
-| `A11YHAWK_ALLOW_PRIVATE`   | `--allow-private` | Set to `true` to permit private/internal targets                            |
-| `A11YHAWK_DISABLE_SANDBOX` | (none)            | Set to `true` to launch Chromium with `--no-sandbox` (some container hosts) |
+| Variable                   | Equivalent flag   | Notes                                                                                            |
+| -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------ |
+| `A11YHAWK_API_KEY`         | `--api-key`       | Enables LLM mode when set                                                                        |
+| `A11YHAWK_PROVIDER`        | `--provider`      | `openrouter` or `anthropic`; checked only in LLM mode                                            |
+| `A11YHAWK_MODEL`           | `--model`         | LLM model id                                                                                     |
+| `A11YHAWK_BASE_URL`        | `--base-url`      | Provider endpoint                                                                                |
+| `A11YHAWK_ALLOW_PRIVATE`   | `--allow-private` | Set to `true` to permit private/internal targets                                                 |
+| `A11YHAWK_DISABLE_SANDBOX` | (none)            | Set to `true` to launch Chromium with `--no-sandbox` (see [Chromium sandbox](#chromium-sandbox)) |
 
 ### Exit codes
 
@@ -378,7 +378,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx playwright@1.57.0 install --with-deps chromium
+      - run: npx playwright@1.64.1 install --with-deps chromium
+      # Ubuntu runners block the user namespaces that Chromium's sandbox needs.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Accessibility gate
         run: npx a11yhawk https://your-site.example --fail-below 90 --format json,html --output a11y-report
       - if: always()
@@ -405,8 +407,10 @@ Add `--api-key ${{ secrets.OPENROUTER_API_KEY }}` for full AI analysis. The job 
 a11yhawk serve                       # listens on :4000
 
 # Docker (browser + system deps baked in; the recommended path).
-# Images are published to GHCR with each tagged release.
-docker run --rm -p 4000:4000 ghcr.io/charlesjones-dev/a11yhawk:latest
+# Images are published to GHCR with each tagged release. The seccomp profile
+# lets Chromium's sandbox run (see Chromium sandbox below).
+curl -fsSLO https://raw.githubusercontent.com/charlesjones-dev/a11yhawk/main/docker/seccomp-chromium.json
+docker run --rm -p 4000:4000 --security-opt seccomp=seccomp-chromium.json ghcr.io/charlesjones-dev/a11yhawk:latest
 
 # Docker Compose (see examples/docker-compose.yml)
 docker compose -f examples/docker-compose.yml up
@@ -442,14 +446,14 @@ The `options` object accepts only `llm { apiKey, provider, model, baseUrl, gener
 
 Every setting is an environment variable, read only by the server layer (never the library):
 
-| Variable                    | Default | Purpose                                                                              |
-| --------------------------- | ------- | ------------------------------------------------------------------------------------ |
-| `A11YHAWK_PORT` (or `PORT`) | `4000`  | Listen port. `serve --port <n>` overrides both.                                      |
-| `A11YHAWK_AUTH_TOKEN`       | (unset) | When set, every endpoint except `/healthz` requires `Authorization: Bearer <token>`. |
-| `A11YHAWK_CONCURRENCY`      | `2`     | Max concurrent scans (clamped 1-10). Extra scans queue FIFO, up to 100 waiting.      |
-| `A11YHAWK_JOB_TTL_SECONDS`  | `3600`  | How long a finished job is retained before eviction.                                 |
-| `A11YHAWK_ALLOW_PRIVATE`    | `false` | Permit scanning private/internal targets (see the note below).                       |
-| `A11YHAWK_DISABLE_SANDBOX`  | `false` | Launch Chromium with `--no-sandbox`; some container hosts require it.                |
+| Variable                    | Default | Purpose                                                                               |
+| --------------------------- | ------- | ------------------------------------------------------------------------------------- |
+| `A11YHAWK_PORT` (or `PORT`) | `4000`  | Listen port. `serve --port <n>` overrides both.                                       |
+| `A11YHAWK_AUTH_TOKEN`       | (unset) | When set, every endpoint except `/healthz` requires `Authorization: Bearer <token>`.  |
+| `A11YHAWK_CONCURRENCY`      | `2`     | Max concurrent scans (clamped 1-10). Extra scans queue FIFO, up to 100 waiting.       |
+| `A11YHAWK_JOB_TTL_SECONDS`  | `3600`  | How long a finished job is retained before eviction.                                  |
+| `A11YHAWK_ALLOW_PRIVATE`    | `false` | Permit scanning private/internal targets (see the note below).                        |
+| `A11YHAWK_DISABLE_SANDBOX`  | `false` | Launch Chromium with `--no-sandbox`. See [Chromium sandbox](#chromium-sandbox) first. |
 
 ### Server security note
 
@@ -464,6 +468,7 @@ A11yHawk is designed to be safe to embed in services where scan URLs come from u
 - **SSRF request guard, default-on.** Every request the scanned page makes is validated at the browser context level: scheme checks, per-request DNS resolution with no cached allow-verdicts, redirect-hop detection, service workers blocked, private, loopback, link-local, and reserved targets refused (including IPv6 addresses that embed one, such as NAT64 and 6to4 forms). A second guard intercepts every request in the shared browser, including the page Lighthouse opens for its audit, so the scanned page's scripts cannot reach a private address during the audit either, and a redirect to one is refused before it is sent. Scan URLs are re-validated at scan time (not just submission time) to narrow DNS-rebinding windows.
 - **`allowPrivateNetworks: true`** exists because scanning your own internal apps is a primary self-hosting use case. It only widens which resolved addresses the guard accepts; every other protection stays active. Leave it `false` anywhere scan URLs come from people you don't trust.
 - **LLM endpoint guard.** `llm.baseUrl` gets the same SSRF posture as scan targets: unless `allowPrivateNetworks` is set, an endpoint on a private, loopback, or link-local address is refused before the scan starts, and the LLM client refuses any connection (including a redirect hop or a re-resolved hostname) that lands on one. Both providers get this check: the OpenRouter client through an HTTP agent, the Anthropic client through a fetch built on the same agent, which also never follows a redirect. A local endpoint such as Ollama needs `allowPrivateNetworks: true` (CLI: `--allow-private`).
+- **Chromium sandbox, default-on.** A page that exploits a browser bug stays inside Chromium's sandbox. Linux hosts and containers need user namespaces for it. See [Chromium sandbox](#chromium-sandbox).
 - **Known residual risks**: WebSocket connections are not intercepted, and Chromium resolves a hostname again after the guard has checked it, which leaves a short DNS-rebinding window. Network-layer egress filtering is the only complete mitigation. If you run A11yHawk multi-tenant, put egress rules around it.
 - **The browser's DevTools port is unauthenticated.** Chromium listens for the DevTools protocol on a random loopback port so Lighthouse can reuse the browser, and Chromium offers no way to require credentials there. Any process on the same host, or any container sharing its network namespace (a Kubernetes sidecar, for example), can connect, drive the browser, read the pages and headers of other scans, and switch off the egress guard. Web pages cannot use it: Chromium refuses DevTools connections from web origins and checks the `Host` header. Run A11yHawk in its own container or on a host without untrusted local users; the Docker image gets its own network namespace unless you run it with `--network host`.
 - **Custom headers stay with the target.** Header and bearer-token entries in `headers` are added only to requests whose origin (scheme, host, and port) matches the scan URL, so third-party scripts, CDNs, and analytics on the page never receive them. Subdomains and the `www`/bare variant are different origins, so pass the URL the page finally lands on. Cookie entries (and a `Cookie` header entry) are set as host-only cookies for the scan URL and follow normal cookie rules, which ignore the port: the browser sends them to that host on any port, for paths under the scan URL's directory, and over plain `http` as well when the scan URL is `http`. Residual gap: Playwright re-sends a request's headers on its redirect hops, so a same-origin URL that redirects to another origin still delivers them to the redirect target.
@@ -475,13 +480,24 @@ A11yHawk is designed to be safe to embed in services where scan URLs come from u
 - **Report output**: everything interpolated into the HTML report, including provider token counts, is entity-escaped, so a malicious scanned page or provider cannot inject markup or script into the report. Server mode also serves it with a `Content-Security-Policy` that allows only the report's own inline script.
 - **No telemetry.** Nothing is collected, nothing phones home. Lighthouse's own error reporting is switched off on every run, whatever an earlier interactive `lighthouse` run on the machine saved.
 
+### Chromium sandbox
+
+Chromium runs with its sandbox on. A page that exploits a renderer bug is still held in a process that can't open files or make network connections by itself. Before 0.8.0, Playwright launched Chromium with `--no-sandbox` because the engine never asked for the sandbox.
+
+On Linux, the sandbox needs user namespaces. When Chromium can't create them, the scan fails and Chromium logs `No usable sandbox!`. Two common setups block them:
+
+- **Docker's default seccomp profile.** Run the container with `--security-opt seccomp=docker/seccomp-chromium.json` from this repository. That file is Docker's default profile with two added rules: `clone` may create user, PID and network namespaces, and `unshare` may create a user namespace. Mount, UTS, IPC, cgroup and time namespaces stay blocked. Keep Docker's default AppArmor profile. On Ubuntu hosts, `apparmor=unconfined` blocks the namespaces again. `examples/docker-compose.yml` already sets the profile.
+- **Ubuntu 23.10 and later, outside a container.** AppArmor blocks user namespaces for programs that have no AppArmor profile of their own, and Playwright's downloaded Chromium has none. This includes GitHub Actions' Ubuntu runners. On a throwaway CI runner, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` lifts the restriction, as the CI example above does. On a long-lived machine, give Chromium its own AppArmor profile instead. Chromium's [AppArmor notes](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) describe the options.
+
+`browser.disableSandbox` (CLI and server: `A11YHAWK_DISABLE_SANDBOX=true`) turns the sandbox off. Use it only where the host leaves no other choice, and put the network controls above around the scanner.
+
 Found a vulnerability? Please open a GitHub security advisory rather than a public issue.
 
 ## For AI agents
 
 Everything above applies; this section is deliberately compact and exact.
 
-- Package: `a11yhawk` (npm). ESM only. Node >= 20. Requires Chromium: `npx playwright@1.57.0 install chromium` (pin matches the bundled Playwright; unpinned is fine only inside a project that has a11yhawk installed).
+- Package: `a11yhawk` (npm). ESM only. Node >= 20. Requires Chromium: `npx playwright@1.64.1 install chromium` (pin matches the bundled Playwright; unpinned is fine only inside a project that has a11yhawk installed).
 - Exports: `scan`, `A11yHawkEngine`, `renderHtmlReport`, `ScanError`, `createLogger`, `DEFAULT_MODEL`, `DEFAULT_ANTHROPIC_MODEL`, plus all types (`ScanOptions`, `EngineOptions`, `ScanReport`, `StructuredScanOutput`, `AccessibilityIssue`, ...). Full `.d.ts` shipped.
 - Minimal complete program:
 

@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.8.0] - 2026-10-24
+
+This release turns on the Chromium sandbox, which earlier versions meant to use but never did. Scans that run in a Docker container with Docker's default seccomp profile, or on Ubuntu 23.10 or later outside a container, can now fail until the host allows the sandbox. Read Breaking changes before upgrading.
+
+### Breaking changes
+
+- **Chromium's sandbox is on.** A container that runs under Docker's default seccomp profile now fails to start Chromium, and the scan fails with `No usable sandbox!` in Chromium's log. Run the container with `--security-opt seccomp=docker/seccomp-chromium.json`, or set `browser.disableSandbox` (`A11YHAWK_DISABLE_SANDBOX=true`) to keep the old behavior. Ubuntu 23.10 and later block the sandbox outside containers too, and that includes GitHub Actions' Ubuntu runners: add `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` to the job, as the README's CI example now does. See [Chromium sandbox](README.md#chromium-sandbox).
+
+### Security
+
+- **The Chromium sandbox was off in every version before 0.8.0.** Playwright launches Chromium with `--no-sandbox` unless the launch passes `chromiumSandbox: true`, and the engine never passed it. So `browser.disableSandbox: false`, the default, did not give a sandbox, and a page that exploited a Chromium bug ran code as the scanning process's user, with that user's file and network access. The engine now passes `chromiumSandbox: true` unless `browser.disableSandbox` is set.
+- **Lighthouse's own Chrome follows the same setting.** When Lighthouse can't reuse the engine's browser and starts its own Chrome, it got `--no-sandbox` every time. It now gets the flag only with `browser.disableSandbox`.
+- **Playwright 1.64.1 with Chromium 156.0.8078.4** (was 1.57.0 with Chromium 143). The new Chromium carries the Chromium security fixes released since 143.
+
+### Added
+
+- **`docker/seccomp-chromium.json`**, a seccomp profile for running the image with the sandbox on. It is Docker's default profile (moby/profiles `seccomp/v0.1.0`) with two added rules: `clone` may create user, PID and network namespaces, and `unshare` may create a user namespace. Mount, UTS, IPC, cgroup and time namespaces stay blocked. `examples/docker-compose.yml` uses it.
+
+### Changed
+
+- **`playwright` is now `~1.64.1`.** Install the matching browser with `npx playwright@1.64.1 install chromium`. The Docker image is built on `mcr.microsoft.com/playwright:v1.64.1-noble`.
+- **The engine no longer sets `Sec-Fetch-*` request headers.** Chromium sets them for each request by itself. Chromium 156 fails any request whose `Sec-Fetch-*` headers are overridden, so with the old fixed values every script, stylesheet, and image on a scanned page would have failed to load.
+
 ## [0.7.0] - 2026-10-08
 
 This release is additive. A scan that does not set `llm.provider` sends the same request to the same endpoint and gets the same results as in 0.6.0; the only visible difference is that `usage.provider` now names the provider.

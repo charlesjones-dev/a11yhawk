@@ -30,9 +30,14 @@ services:
       # Permit scanning private/internal targets. Only enable on a trusted
       # network; it widens which addresses the SSRF guard accepts.
       # A11YHAWK_ALLOW_PRIVATE: 'true'
-      # Disable the Chromium sandbox. Needed on some hosts (e.g. Railway) that
-      # cannot grant the required kernel capabilities.
+      # Disable the Chromium sandbox. Only for hosts that can't give Chromium
+      # user namespaces, even with the seccomp profile below.
       # A11YHAWK_DISABLE_SANDBOX: 'true'
+    # Chromium's sandbox needs user namespaces, which Docker's default seccomp
+    # profile blocks. This profile is Docker's default plus user, PID and network
+    # namespaces. Compose reads the path from this file's folder.
+    security_opt:
+      - seccomp=../docker/seccomp-chromium.json
     # Reap zombie browser/Lighthouse subprocesses and forward signals cleanly.
     init: true
     restart: unless-stopped

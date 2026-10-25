@@ -262,9 +262,9 @@ function countA11yElements(node: A11yNode | null): { total: number; images: numb
 
 export interface PlaywrightServiceOptions {
   /**
-   * Launch Chromium with --no-sandbox / --disable-setuid-sandbox. Only for containerized
-   * environments that restrict kernel namespaces; a critical security risk otherwise.
-   * Default false.
+   * Launch Chromium with --no-sandbox / --disable-setuid-sandbox. Only for hosts that can't
+   * give Chromium user namespaces (a container under Docker's default seccomp profile, for
+   * example); a critical security risk otherwise. Default false.
    */
   disableSandbox?: boolean;
   /**
@@ -354,9 +354,10 @@ export class PlaywrightService {
         '--remote-debugging-address=127.0.0.1',
       ];
 
-      // SECURITY NOTE: --no-sandbox is a critical security risk but may be required
-      // in containerized environments like Railway that restrict kernel namespaces.
-      // Only enable if deployment requires it. Consider these compensating controls:
+      // SECURITY NOTE: --no-sandbox is a critical security risk. Chromium's sandbox
+      // needs user namespaces, which some hosts don't allow: Docker's default seccomp
+      // profile blocks them (docker/seccomp-chromium.json allows them). Only disable it
+      // where the host leaves no choice. Compensating controls:
       // 1. Network isolation for browser process
       // 2. Strict URL validation (see url-validator.ts)
       // 3. Resource limits and timeouts (implemented below)
@@ -368,12 +369,16 @@ export class PlaywrightService {
       log.info('Launching browser server', { cdpPort: this.cdpPort });
       this.browserServer = await chromium.launchServer({
         headless: true,
+        // Playwright adds --no-sandbox unless this is true, so the sandbox is only on
+        // when we ask for it.
+        chromiumSandbox: !this.disableSandbox,
         args,
         timeout: 30000, // 30 second timeout for browser launch
       });
 
-      // Playwright 1.57's implicit deadline expires after ~24.9 days of process
-      // uptime. An explicit timeout keeps connections working in long-lived hosts.
+      // Playwright 1.57's implicit connect deadline expired after ~24.9 days of
+      // process uptime. 1.64 no longer fails that way, and the explicit timeout
+      // keeps long-lived hosts safe whatever the default does.
       this.browser = await chromium.connect(this.browserServer.wsEndpoint(), { timeout: 30_000 });
 
       // Lighthouse audits in its own page over the CDP port, outside the capture
@@ -517,10 +522,9 @@ export class PlaywrightService {
       'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
       'Sec-Ch-Ua-Mobile': '?0',
       'Sec-Ch-Ua-Platform': '"Windows"',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
+      // No Sec-Fetch-* headers: Chromium sets them per request. With Playwright 1.64
+      // (Chromium 156), any request whose Sec-Fetch-* headers are overridden fails with
+      // net::ERR_INVALID_ARGUMENT, so every script, stylesheet, and image failed to load.
       'Upgrade-Insecure-Requests': '1',
     };
 
@@ -832,10 +836,9 @@ export class PlaywrightService {
       'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
       'Sec-Ch-Ua-Mobile': '?0',
       'Sec-Ch-Ua-Platform': '"Windows"',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
+      // No Sec-Fetch-* headers: Chromium sets them per request. With Playwright 1.64
+      // (Chromium 156), any request whose Sec-Fetch-* headers are overridden fails with
+      // net::ERR_INVALID_ARGUMENT, so every script, stylesheet, and image failed to load.
       'Upgrade-Insecure-Requests': '1',
     };
 

@@ -3,7 +3,7 @@
 # a11yhawk container image.
 #
 # Base is the official Playwright image whose tag is pinned to the exact
-# `playwright` dependency version (1.57.0): it bakes in a matching Chromium plus
+# `playwright` dependency version (1.64.1): it bakes in a matching Chromium plus
 # every system library the browser and Lighthouse need. Building on anything
 # else means fighting missing shared libraries. The digest pins the multi-arch
 # index the tag pointed to, so a re-pushed tag cannot change the build; bump both
@@ -13,9 +13,16 @@
 # dependency tree; the runtime stage carries only production dependencies and
 # the compiled output, and runs as the image's non-root pwuser with the
 # Chromium sandbox left enabled.
+#
+# The sandbox needs user namespaces, and Docker's default seccomp profile blocks
+# them, so Chromium stops with "No usable sandbox!". Run the image with
+# `--security-opt seccomp=docker/seccomp-chromium.json`. That profile is
+# Docker's default plus user, PID and network namespaces. Keep Docker's default
+# AppArmor profile. On Ubuntu hosts, `apparmor=unconfined` blocks the namespaces
+# again. A11YHAWK_DISABLE_SANDBOX=true turns the sandbox off instead.
 
 # ---- build stage ------------------------------------------------------------
-FROM mcr.microsoft.com/playwright:v1.57.0-noble@sha256:3bed4b1a12f2338642f3d8cba28e291deef3c66bd4a964bbeb3e57bbff511dbd AS build
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea AS build
 
 WORKDIR /app
 
@@ -28,7 +35,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- runtime stage ----------------------------------------------------------
-FROM mcr.microsoft.com/playwright:v1.57.0-noble@sha256:3bed4b1a12f2338642f3d8cba28e291deef3c66bd4a964bbeb3e57bbff511dbd AS runtime
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea AS runtime
 
 ENV NODE_ENV=production
 # Default listen port; overridable at runtime. Kept in sync with EXPOSE below.
