@@ -44,3 +44,7 @@ Chronological record of KB operations. Append-only — newest entries at the bot
 - Removed the Knowledge Base section and the kb-auto block from CLAUDE.md
 - Added the AGENTS.md pointer
 - Frontmatter fixes: 7; links turned into paths: 9; command references updated: 0
+
+## [2026-11-03] learn | Auto-saved: npm registry lags the publish job; check GHCR without docker
+
+- Updated: .claude/rules/kb/tools/releases-and-publishing.md
