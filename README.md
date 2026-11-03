@@ -160,7 +160,7 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 | `finalUrl`            | `string`                              | Guard-validated post-redirect URL that was actually analyzed                                                                 |
 | `durationMs`          | `number`                              |                                                                                                                              |
 
-Use `renderHtmlReport(report)` to turn any `ScanReport` into a single self-contained HTML document (inline CSS/JS, images as data URIs, renders from `file://`, itself WCAG AA accessible).
+Use `renderHtmlReport(report)` to turn any `ScanReport` into a single self-contained HTML document (inline CSS/JS, images as data URIs, renders from `file://`, itself WCAG AA accessible). Use `renderSarifReport(report)` to get a SARIF 2.1.0 log for CI tools.
 
 ### Anthropic provider
 
@@ -325,7 +325,7 @@ The default command scans a single URL and writes `report.json` and `report.md` 
 | `--wcag <2.0\|2.1\|2.2>` | `2.1`                           | WCAG version                                                                                                                    |
 | `--level <A\|AA\|AAA>`   | `AA`                            | Conformance level                                                                                                               |
 | `--header "Name: value"` | none                            | Custom request header; repeatable                                                                                               |
-| `--format <list>`        | `json,md`                       | Comma-separated output formats: `json`, `md`, `html`                                                                            |
+| `--format <list>`        | `json,md`                       | Comma-separated output formats: `json`, `md`, `html`, `sarif`                                                                   |
 | `--output <dir>`         | `./a11yhawk-output/<timestamp>` | Directory for report files and screenshots                                                                                      |
 | `--stdout`               | off                             | Print structured JSON to stdout instead of writing files                                                                        |
 | `--open`                 | off                             | Open `report.html` after writing (implies `html` in `--format`)                                                                 |
@@ -498,7 +498,7 @@ Found a vulnerability? Please open a GitHub security advisory rather than a publ
 Everything above applies; this section is deliberately compact and exact.
 
 - Package: `a11yhawk` (npm). ESM only. Node >= 20. Requires Chromium: `npx playwright@1.64.1 install chromium` (pin matches the bundled Playwright; unpinned is fine only inside a project that has a11yhawk installed).
-- Exports: `scan`, `A11yHawkEngine`, `renderHtmlReport`, `ScanError`, `createLogger`, `DEFAULT_MODEL`, `DEFAULT_ANTHROPIC_MODEL`, plus all types (`ScanOptions`, `EngineOptions`, `ScanReport`, `StructuredScanOutput`, `AccessibilityIssue`, ...). Full `.d.ts` shipped.
+- Exports: `scan`, `A11yHawkEngine`, `renderHtmlReport`, `renderSarifReport`, `ScanError`, `createLogger`, `DEFAULT_MODEL`, `DEFAULT_ANTHROPIC_MODEL`, plus all types (`ScanOptions`, `EngineOptions`, `ScanReport`, `StructuredScanOutput`, `AccessibilityIssue`, ...). Full `.d.ts` shipped.
 - Minimal complete program:
 
 ```js
@@ -554,13 +554,14 @@ The directory also holds two deployment templates: `docker-compose.yml` (server 
 - **`structured`** (JSON): overall score (0-100: the percent of checked WCAG criteria with no issues found, recomputed by the engine and 0 when the model reports no criteria; the Lighthouse accessibility score in Lighthouse-only mode), per-severity statistics, WCAG coverage marking each checked criterion as issues found or no issues found (`passed`), issues with location/selector, code context, impact, and remediation, passed checks. Stable shape; treat as the source of truth.
 - **`markdown`**: the same content as a readable report.
 - **HTML** (via `renderHtmlReport`): a single dark-theme file with score ring, severity breakdown, sortable/collapsible issues with client-side resolve tracking (localStorage), and the annotated screenshot. Attach it to CI artifacts, tickets, or email; it has zero external dependencies.
+- **SARIF** (via `renderSarifReport`, or `--format sarif` for `report.sarif`): a SARIF 2.1.0 log for CI and code scanning tools. Each WCAG success criterion is one rule (`wcag/1.1.1`), so a criterion keeps its rule id across scans. Issues without a criterion use `best-practice` or `unmapped`. Each issue is one result: critical and high map to `error`, medium to `warning`, and low to `note`. The result message gives the location, the WCAG criterion, the failing element, and the suggested fix. Every result points at the scanned page URL, because the scan sees rendered HTML, not your source files. In Lighthouse-only mode the fix is Lighthouse's text advice, not corrected HTML.
 
 Reports describe what was checked and what was found on one page. Automated and AI checks find WCAG failures but cover only part of WCAG, so a scan cannot establish conformance, and the reports say so: they are not a compliance certification.
 
 ## Roadmap
 
 - **GitHub Action** wrapper.
-- SARIF and JUnit output formats.
+- JUnit output format.
 
 ## Contributing
 
