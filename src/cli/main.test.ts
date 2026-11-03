@@ -139,6 +139,10 @@ describe('parseFormatList', () => {
     expect(parseFormatList('json,json,md')).toEqual(['json', 'md']);
   });
 
+  it('accepts sarif as a format', () => {
+    expect(parseFormatList('json,sarif')).toEqual(['json', 'sarif']);
+  });
+
   it('rejects an unknown format', () => {
     expect(() => parseFormatList('pdf')).toThrow(/Unknown --format value/);
     expect(() => parseFormatList('json,pdf')).toThrow(/Unknown --format value/);

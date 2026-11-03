@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.8.1] - 2026-11-03
+
+### Added
+
+- **SARIF output.** `--format sarif` writes `report.sarif`, a SARIF 2.1.0 log, and the library exports `renderSarifReport(report)`. Each WCAG success criterion is one rule and each issue is one result. The result message carries the failing element and the suggested fix. See [Output formats](README.md#output-formats).
+
 ## [0.8.0] - 2026-10-24
 
 This release turns on the Chromium sandbox, which earlier versions meant to use but never did. Scans that run in a Docker container with Docker's default seccomp profile, or on Ubuntu 23.10 or later outside a container, can now fail until the host allows the sandbox. Read Breaking changes before upgrading.

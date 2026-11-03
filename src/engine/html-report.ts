@@ -23,7 +23,7 @@ import type { AccessibilityIssue, PassedCheck, StructuredScanOutput, WCAGCoverag
 import type { ScanReport } from './scan.js';
 
 /** GitHub repository shown in the footer credit (the only non-page external link). */
-const REPO_URL = 'https://github.com/charlesjones-dev/a11yhawk';
+export const REPO_URL = 'https://github.com/charlesjones-dev/a11yhawk';
 
 /** Presentation metadata per issue severity. `rank` orders the default sort. */
 const SEVERITY_META: Record<AccessibilityIssue['severity'], { label: string; rank: number }> = {
@@ -71,8 +71,8 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-/** Package version for the footer, read at runtime. Empty string if unavailable. */
-function readVersion(): string {
+/** Package version for report metadata, read at runtime. Empty string if unavailable. */
+export function readVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
       version?: string;

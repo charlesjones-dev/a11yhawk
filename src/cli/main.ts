@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { renderHtmlReport } from '../engine/html-report.js';
+import { renderSarifReport } from '../engine/sarif-report.js';
 import { LLM_PROVIDERS, scan, ScanError } from '../engine/scan.js';
 import type {
   OneShotScanOptions,
@@ -49,8 +50,8 @@ export class CliConfigError extends Error {
   }
 }
 
-export type OutputFormat = 'json' | 'md' | 'html';
-const VALID_FORMATS: readonly OutputFormat[] = ['json', 'md', 'html'];
+export type OutputFormat = 'json' | 'md' | 'html' | 'sarif';
+const VALID_FORMATS: readonly OutputFormat[] = ['json', 'md', 'html', 'sarif'];
 
 /** Raw, validated scan flags before env fallback is applied. */
 export interface ParsedScanFlags {
@@ -420,6 +421,9 @@ async function emitOutputs(report: ScanReport, run: CliRunConfig): Promise<void>
     htmlPath = join(run.outputDir, 'report.html');
     await writeFile(htmlPath, renderHtmlReport(report));
   }
+  if (run.formats.includes('sarif')) {
+    await writeFile(join(run.outputDir, 'report.sarif'), renderSarifReport(report));
+  }
   if (report.screenshot) {
     await writeFile(join(run.outputDir, 'screenshot.jpg'), report.screenshot);
   }
@@ -537,7 +541,7 @@ Scan options:
   --wcag <2.0|2.1|2.2>    WCAG version (default: 2.1)
   --level <A|AA|AAA>      Conformance level (default: AA)
   --header "Name: value"  Custom request header (repeatable)
-  --format <list>         Comma-separated: json,md,html (default: json,md)
+  --format <list>         Comma-separated: json,md,html,sarif (default: json,md)
   --output <dir>          Output directory (default: ./a11yhawk-output/<timestamp>)
   --stdout                Print structured JSON to stdout instead of writing files
   --open                  Open report.html after writing (implies html format)

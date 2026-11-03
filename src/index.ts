@@ -45,5 +45,6 @@ export type {
   LighthouseTransformedResult,
 } from './engine/lighthouse.js';
 export { renderHtmlReport } from './engine/html-report.js';
+export { renderSarifReport } from './engine/sarif-report.js';
 export { createLogger } from './logger/index.js';
 export type { Logger } from './logger/index.js';
