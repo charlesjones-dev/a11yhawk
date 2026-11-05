@@ -1,7 +1,7 @@
 ---
 tags: [log, meta]
 created: 2026-07-20
-last-updated: 2026-10-12
+last-updated: 2026-11-05
 ---
 
 # Knowledge Base Log
@@ -46,5 +46,9 @@ Chronological record of KB operations. Append-only — newest entries at the bot
 - Frontmatter fixes: 7; links turned into paths: 9; command references updated: 0
 
 ## [2026-11-03] learn | Auto-saved: npm registry lags the publish job; check GHCR without docker
+
+- Updated: .claude/rules/kb/tools/releases-and-publishing.md
+
+## [2026-11-05] learn | Auto-saved: read the MCR base-image digest without docker
 
 - Updated: .claude/rules/kb/tools/releases-and-publishing.md

@@ -5,7 +5,7 @@ paths:
   - 'CHANGELOG.md'
 tags: [release, npm, publishing, ghcr, versioning, publish]
 created: 2026-07-20
-last-updated: 2026-11-03
+last-updated: 2026-11-05
 ---
 
 # Releases and Publishing
@@ -19,6 +19,7 @@ Operational lessons for publishing a11yhawk to npm and GHCR, learned during the 
 - The npm trusted-publisher config's "Environment name" field must exactly match the workflow's `environment:` declaration. Our `release.yml` declares none, so the field must stay blank; setting it breaks the OIDC handshake.
 - After a first GHCR push, verify anonymous pullability with `docker manifest inspect ghcr.io/charlesjones-dev/a11yhawk:<tag>`. Packages pushed via `GITHUB_TOKEN` can default to private; ours came up public, but verify rather than assume. Without docker, get an anonymous token from `https://ghcr.io/token?scope=repository:charlesjones-dev/a11yhawk:pull` and request `/v2/charlesjones-dev/a11yhawk/manifests/<tag>`; 200 means public. Image tags have no `v` prefix (`0.8.1`, `latest`).
 - The npm registry can 404 a new version for about 40 seconds after the publish job logs `+ a11yhawk@X.Y.Z`. Poll `registry.npmjs.org/a11yhawk` for a minute before treating the publish as failed.
+- To re-pin the Dockerfile base image without docker, read the multi-arch index digest from MCR: `curl -sI -H 'Accept: application/vnd.oci.image.index.v1+json' https://mcr.microsoft.com/v2/playwright/manifests/vX.Y.Z-noble` (the `docker-content-digest` header), and confirm it by piping the same GET body to `shasum -a 256`. MCR re-pushes tags (`v1.64.1-noble` moved from `47b510dd…` to `2f05f8a7…`), so a tag's current digest can differ from the old pin.
 - `arethetypeswrong` reports `CJSResolvesToESM` for this package. That is the intentional ESM-only posture (documented in the README), not a defect. `publint` should stay fully clean.
 
 ## Related
