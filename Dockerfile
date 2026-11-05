@@ -3,7 +3,7 @@
 # a11yhawk container image.
 #
 # Base is the official Playwright image whose tag is pinned to the exact
-# `playwright` dependency version (1.64.1): it bakes in a matching Chromium plus
+# `playwright` dependency version (1.65.0): it bakes in a matching Chromium plus
 # every system library the browser and Lighthouse need. Building on anything
 # else means fighting missing shared libraries. The digest pins the multi-arch
 # index the tag pointed to, so a re-pushed tag cannot change the build; bump both
@@ -22,7 +22,7 @@
 # again. A11YHAWK_DISABLE_SANDBOX=true turns the sandbox off instead.
 
 # ---- build stage ------------------------------------------------------------
-FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea AS build
+FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d AS build
 
 WORKDIR /app
 
@@ -35,7 +35,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- runtime stage ----------------------------------------------------------
-FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea AS runtime
+FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d AS runtime
 
 ENV NODE_ENV=production
 # Default listen port; overridable at runtime. Kept in sync with EXPOSE below.
