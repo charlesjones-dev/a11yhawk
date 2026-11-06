@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.8.2] - 2026-11-05
+
+### Security
+
+- **Playwright 1.65.0 with Chromium 158.0.8127.18** (was 1.64.1 with Chromium 156.0.8078.4). In October 2026, the keys of eight eMudhra intermediate CAs were compromised. The keys are weak enough to recover from public data, so anyone can forge a TLS certificate that chains to them. Browsers block these CAs through CRLSet and root-store updates, but Playwright's bundled Chromium gets no CRLSet updates. So with 0.8.1 and earlier, an attacker who could intercept a scan's traffic could present a forged certificate for any host, and the scan accepted it. Chromium 158 rejects these CAs. Chromium 156 loaded the public test hosts `dv-g3b-emudhra.we-have-a-problem.com` and `ev-g3c-emudhra.we-have-a-problem.com`, which chain to two of the compromised CAs. Chromium 158 refuses both with `net::ERR_CERT_AUTHORITY_INVALID`.
+
+### Changed
+
+- **`playwright` is now `~1.65.0`.** Install the matching browser with `npx playwright@1.65.0 install chromium`. The Docker image is built on `mcr.microsoft.com/playwright:v1.65.0-noble`.
+
 ## [0.8.1] - 2026-11-03
 
 ### Added
