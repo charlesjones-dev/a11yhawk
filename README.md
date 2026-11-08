@@ -515,6 +515,16 @@ const report = await scan('https://example.com'); // Lighthouse-only, no key nee
 - Shelling out instead of importing: `npx a11yhawk <url> --stdout` prints the structured JSON to stdout (progress goes to stderr). Exit codes: 0 success, 1 below `--fail-below`, 2 scan error, 3 configuration error. `npx a11yhawk doctor` preflights the environment.
 - A self-hostable HTTP mode exists (`a11yhawk serve`, `POST /scans` then poll `GET /scans/:id`); see Server mode above.
 
+### Agent Skill
+
+This repo ships an [Agent Skill](https://agentskills.io/) that teaches coding agents to run A11yHawk scans with the CLI and library. Install it with the [skills CLI](https://skills.sh/):
+
+```sh
+npx skills add charlesjones-dev/a11yhawk --skill a11yhawk
+```
+
+The skill lives in [`skills/a11yhawk/SKILL.md`](./skills/a11yhawk/SKILL.md).
+
 ## Examples
 
 Runnable scripts live in [`examples/`](./examples/). They import `a11yhawk` by package name (Node resolves the package's own name from inside the repo), so every script is byte-for-byte what you would write in your own project.
