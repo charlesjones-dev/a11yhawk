@@ -84,6 +84,7 @@ function makeReport(): ScanReport {
     },
     usage: null,
     finalUrl: 'https://example.com',
+    filteredRequests: [],
     durationMs: 1234,
   };
 }

@@ -5,6 +5,7 @@ import type { LlmProvider, ScanHeader } from '../types.js';
 import type { Logger } from '../logger/index.js';
 import { createLogger } from '../logger/index.js';
 import { installBrowserRequestGuard, installRequestGuard } from './request-guard.js';
+import type { FilteredRequest, RequestFilter } from './request-guard.js';
 import { installScopedHeaders } from './scoped-headers.js';
 
 /**
@@ -155,6 +156,8 @@ export interface PageAnalysisResult {
   accessibilityTree: Record<string, unknown> | null;
   html: string;
   finalUrl: string; // URL after redirects - every hop was validated by the request guard
+  /** Hosts the request filter refused during capture without failing it (empty without a filter). */
+  filteredRequests: FilteredRequest[];
 }
 
 // Interface for accessibility tree nodes
@@ -277,6 +280,8 @@ export interface PlaywrightServiceOptions {
    * the SSRF request guard. Every other request-guard protection stays active. Default false.
    */
   allowPrivateNetworks?: boolean;
+  /** Host policy applied to every browser request after the SSRF checks; see RequestFilter. */
+  requestFilter?: RequestFilter;
 }
 
 export class PlaywrightService {
@@ -289,6 +294,7 @@ export class PlaywrightService {
   private readonly disableSandbox: boolean;
   private readonly debug: boolean;
   private readonly allowPrivateNetworks: boolean;
+  private readonly requestFilter: RequestFilter | undefined;
 
   constructor(options: PlaywrightServiceOptions = {}) {
     // Default concurrency - will be overridden by setConcurrency() after MongoDB config loads
@@ -296,6 +302,7 @@ export class PlaywrightService {
     this.disableSandbox = options.disableSandbox ?? false;
     this.debug = options.debug ?? false;
     this.allowPrivateNetworks = options.allowPrivateNetworks ?? false;
+    this.requestFilter = options.requestFilter;
   }
 
   setConcurrency(concurrency: number): void {
@@ -385,7 +392,9 @@ export class PlaywrightService {
       // contexts' request guard, so guard the whole browser as well.
       if (!this.allowPrivateNetworks) {
         try {
-          await installBrowserRequestGuard(await this.browser.newBrowserCDPSession(), log);
+          await installBrowserRequestGuard(await this.browser.newBrowserCDPSession(), log, {
+            requestFilter: this.requestFilter,
+          });
         } catch (error) {
           await this.cleanup();
           throw error;
@@ -563,6 +572,7 @@ export class PlaywrightService {
     // (including popups, redirect targets, per-request DNS re-resolution).
     const requestGuard = await installRequestGuard(context, page, log, {
       allowPrivateNetworks: this.allowPrivateNetworks,
+      requestFilter: this.requestFilter,
     });
     // After the guard, so the guard still makes the final call on every request.
     await installScopedHeaders(context, url, customHeaders);
@@ -746,6 +756,7 @@ export class PlaywrightService {
             accessibilityTree: snapshot,
             html,
             finalUrl: page.url(),
+            filteredRequests: [] as FilteredRequest[],
           };
         })(),
         operationPromise,
@@ -756,7 +767,8 @@ export class PlaywrightService {
       // in-flight redirect validations so a fast internal redirect can't beat its verdict.
       await requestGuard.assertNoViolation();
 
-      return result;
+      // Read after the drain above, so refusals from late redirect hops are included.
+      return { ...result, filteredRequests: [...requestGuard.filteredRequests] };
     } catch (error) {
       // A blocked navigation surfaces from Playwright as an opaque net::ERR_BLOCKED_BY_CLIENT
       // (or "page closed" when the redirect guard killed the page) - rethrow it as a
@@ -859,7 +871,10 @@ export class PlaywrightService {
     // so it needs the same request validation as the main capture. A violation closes
     // the page; the resulting error is swallowed by the catch below (annotation is
     // non-blocking) and the scan continues without bounding boxes.
-    await installRequestGuard(context, page, log, { allowPrivateNetworks: this.allowPrivateNetworks });
+    await installRequestGuard(context, page, log, {
+      allowPrivateNetworks: this.allowPrivateNetworks,
+      requestFilter: this.requestFilter,
+    });
     // After the guard, so the guard still makes the final call on every request.
     await installScopedHeaders(context, headerScopeUrl, customHeaders);
 

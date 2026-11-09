@@ -65,6 +65,7 @@ function makeReport(overrides: Partial<ScanReport> = {}): ScanReport {
     lighthouse: null,
     usage: null,
     finalUrl: 'https://example.com',
+    filteredRequests: [],
     durationMs: 1234,
     ...overrides,
   };

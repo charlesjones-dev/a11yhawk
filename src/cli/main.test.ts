@@ -295,6 +295,7 @@ describe('exitCodeForScanError', () => {
     'invalid-options',
     'invalid-url',
     'blocked-request',
+    'blocked-by-filter',
     'capture-failed',
     'lighthouse-failed',
     'llm-auth',

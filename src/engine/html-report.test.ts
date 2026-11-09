@@ -126,6 +126,7 @@ function makeReport(overrides: Partial<ScanReport> = {}): ScanReport {
       modelId: 'anthropic/claude-sonnet-4.5',
     },
     finalUrl: 'https://example.com/pricing',
+    filteredRequests: [],
     durationMs: 8300,
     ...overrides,
   };

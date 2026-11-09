@@ -55,6 +55,7 @@ function makeReport(issues: AccessibilityIssue[]): ScanReport {
     lighthouse: null,
     usage: null,
     finalUrl: structured.url,
+    filteredRequests: [],
     durationMs: 1,
   };
 }

@@ -345,6 +345,7 @@ export const EXIT_FOR_SCAN_ERROR: Record<ScanErrorCode, number> = {
   'invalid-options': EXIT_SCAN_ERROR,
   'invalid-url': EXIT_SCAN_ERROR,
   'blocked-request': EXIT_SCAN_ERROR,
+  'blocked-by-filter': EXIT_SCAN_ERROR,
   'capture-failed': EXIT_SCAN_ERROR,
   'lighthouse-failed': EXIT_SCAN_ERROR,
   'llm-auth': EXIT_SCAN_ERROR,

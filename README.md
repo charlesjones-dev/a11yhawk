@@ -140,25 +140,27 @@ One-shot `scan()` accepts `ScanOptions & EngineOptions` and manages the browser 
 
 **EngineOptions**
 
-| Option                   | Type      | Default        | Notes                                                                    |
-| ------------------------ | --------- | -------------- | ------------------------------------------------------------------------ |
-| `allowPrivateNetworks`   | `boolean` | `false`        | See [Security](#security) before enabling                                |
-| `browser.disableSandbox` | `boolean` | `false`        | Chromium `--no-sandbox`. See [Chromium sandbox](#chromium-sandbox) first |
-| `browser.debug`          | `boolean` | `false`        | Extra capture diagnostics                                                |
-| `logger`                 | `Logger`  | console logger |                                                                          |
+| Option                   | Type            | Default        | Notes                                                                                 |
+| ------------------------ | --------------- | -------------- | ------------------------------------------------------------------------------------- |
+| `allowPrivateNetworks`   | `boolean`       | `false`        | See [Security](#security) before enabling                                             |
+| `requestFilter`          | `RequestFilter` | none           | Your own host policy for every browser request. See [Request filter](#request-filter) |
+| `browser.disableSandbox` | `boolean`       | `false`        | Chromium `--no-sandbox`. See [Chromium sandbox](#chromium-sandbox) first              |
+| `browser.debug`          | `boolean`       | `false`        | Extra capture diagnostics                                                             |
+| `logger`                 | `Logger`        | console logger |                                                                                       |
 
 **ScanReport**
 
-| Field                 | Type                                  | Notes                                                                                                                        |
-| --------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `structured`          | `StructuredScanOutput`                | Machine-readable source of truth: score, statistics, WCAG coverage, issues with remediation, passed checks                   |
-| `markdown`            | `string`                              | Human-readable report                                                                                                        |
-| `screenshot`          | `Buffer \| null`                      | Full-page JPEG                                                                                                               |
-| `annotatedScreenshot` | `Buffer \| null`                      | Issues boxed on the page, when annotation resolved any selectors                                                             |
-| `lighthouse`          | `LighthouseTransformedResult \| null` | Lighthouse findings mapped to WCAG, plus `lighthouseVersion` and (when requested) `performance` / `raw`                      |
-| `usage`               | `ScanUsage \| null`                   | Tokens + cost in USD, the provider, and (Anthropic) cache writes and the model that answered; `null` in Lighthouse-only mode |
-| `finalUrl`            | `string`                              | Guard-validated post-redirect URL that was actually analyzed                                                                 |
-| `durationMs`          | `number`                              |                                                                                                                              |
+| Field                 | Type                                  | Notes                                                                                                                                         |
+| --------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `structured`          | `StructuredScanOutput`                | Machine-readable source of truth: score, statistics, WCAG coverage, issues with remediation, passed checks                                    |
+| `markdown`            | `string`                              | Human-readable report                                                                                                                         |
+| `screenshot`          | `Buffer \| null`                      | Full-page JPEG                                                                                                                                |
+| `annotatedScreenshot` | `Buffer \| null`                      | Issues boxed on the page, when annotation resolved any selectors                                                                              |
+| `lighthouse`          | `LighthouseTransformedResult \| null` | Lighthouse findings mapped to WCAG, plus `lighthouseVersion` and (when requested) `performance` / `raw`                                       |
+| `usage`               | `ScanUsage \| null`                   | Tokens + cost in USD, the provider, and (Anthropic) cache writes and the model that answered; `null` in Lighthouse-only mode                  |
+| `finalUrl`            | `string`                              | Guard-validated post-redirect URL that was actually analyzed                                                                                  |
+| `filteredRequests`    | `FilteredRequest[]`                   | Hosts `requestFilter` refused during capture without failing the scan (`{ host, reason }`, one per host, at most 100). Empty without a filter |
+| `durationMs`          | `number`                              |                                                                                                                                               |
 
 Use `renderHtmlReport(report)` to turn any `ScanReport` into a single self-contained HTML document (inline CSS/JS, images as data URIs, renders from `file://`, itself WCAG AA accessible). Use `renderSarifReport(report)` to get a SARIF 2.1.0 log for CI tools.
 
@@ -247,6 +249,26 @@ try {
 - Every scan-time failure is a `ScanError` with a `retryable` flag; map `retryable: true` onto your crawler's retry queue and drop the rest.
 - The repo carries an opt-in soak test asserting flat memory and stable handle counts across sequential scans on one engine: `A11YHAWK_SOAK=1 A11YHAWK_SOAK_SCANS=1000 NODE_OPTIONS=--expose-gc npx vitest run src/engine/scan.soak.test.ts`.
 
+### Request filter
+
+`EngineOptions.requestFilter` lets you refuse hosts on top of the SSRF guard, for example sites a malware or phishing block list names. The engine calls it with the parsed `URL` of every request the browser makes: the scan URL (before the browser starts), navigations, redirect hops, subresources, iframes, popups, and the page Lighthouse opens. It runs only after the SSRF checks pass, so it can refuse more, never less.
+
+```js
+import { A11yHawkEngine } from 'a11yhawk';
+
+const blocked = new Set(['phish.example', 'malware-cdn.example']);
+const engine = new A11yHawkEngine({
+  requestFilter: (url) =>
+    blocked.has(url.hostname) ? { allowed: false, reason: 'on our block list' } : { allowed: true },
+});
+```
+
+- A refused scan URL, main-page navigation, or main-page redirect fails the scan with the non-retryable `blocked-by-filter` code.
+- Any other refused request is aborted, like an ad blocker would, and its host is listed in `report.filteredRequests`.
+- The filter may return a promise. The engine caches nothing, and capture pages run each request through it twice (the context guard and the browser-wide guard), so cache slow lookups yourself.
+- A thrown error or rejected promise counts as a refusal. Catch errors inside the filter if it should fail open.
+- WebSocket connections are not checked, as with the SSRF guard.
+
 ### Error handling
 
 Every pipeline failure throws a `ScanError` with a `code` and a `retryable` flag, so queue-based hosts can map failures onto their retry semantics:
@@ -256,6 +278,7 @@ Every pipeline failure throws a `ScanError` with a `code` and a `retryable` flag
 | `invalid-options`   | no                           | Contradictory configuration (e.g. no LLM and Lighthouse disabled)                             |
 | `invalid-url`       | no                           | URL failed validation (malformed, non-http(s), or blocked target)                             |
 | `blocked-request`   | no                           | The SSRF guard blocked a navigation or redirect                                               |
+| `blocked-by-filter` | no                           | `requestFilter` refused the scan URL, the main page's navigation, or one of its redirects     |
 | `capture-failed`    | yes                          | Browser navigation/capture failure (often transient)                                          |
 | `lighthouse-failed` | yes                          | Lighthouse failed in Lighthouse-only mode (non-blocking in LLM mode)                          |
 | `llm-auth`          | no                           | API key invalid or expired, or (Anthropic) not allowed to make the request                    |
@@ -466,6 +489,7 @@ Every setting is an environment variable, read only by the server layer (never t
 A11yHawk is designed to be safe to embed in services where scan URLs come from untrusted users, and honest about its residual risks.
 
 - **SSRF request guard, default-on.** Every request the scanned page makes is validated at the browser context level: scheme checks, per-request DNS resolution with no cached allow-verdicts, redirect-hop detection, service workers blocked, private, loopback, link-local, and reserved targets refused (including IPv6 addresses that embed one, such as NAT64 and 6to4 forms). A second guard intercepts every request in the shared browser, including the page Lighthouse opens for its audit, so the scanned page's scripts cannot reach a private address during the audit either, and a redirect to one is refused before it is sent. Scan URLs are re-validated at scan time (not just submission time) to narrow DNS-rebinding windows.
+- **Host policy.** `requestFilter` adds your own refusals (for example a threat block list) to every request both guards see. See [Request filter](#request-filter).
 - **`allowPrivateNetworks: true`** exists because scanning your own internal apps is a primary self-hosting use case. It only widens which resolved addresses the guard accepts; every other protection stays active. Leave it `false` anywhere scan URLs come from people you don't trust.
 - **LLM endpoint guard.** `llm.baseUrl` gets the same SSRF posture as scan targets: unless `allowPrivateNetworks` is set, an endpoint on a private, loopback, or link-local address is refused before the scan starts, and the LLM client refuses any connection (including a redirect hop or a re-resolved hostname) that lands on one. Both providers get this check: the OpenRouter client through an HTTP agent, the Anthropic client through a fetch built on the same agent, which also never follows a redirect. A local endpoint such as Ollama needs `allowPrivateNetworks: true` (CLI: `--allow-private`).
 - **Chromium sandbox, default-on.** A page that exploits a browser bug stays inside Chromium's sandbox. Linux hosts and containers need user namespaces for it. See [Chromium sandbox](#chromium-sandbox).

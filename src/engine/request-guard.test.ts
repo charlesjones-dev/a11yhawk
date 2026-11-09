@@ -191,6 +191,60 @@ describe('Request Guard — checkRequestTarget', () => {
   });
 });
 
+describe('Request Guard — request filter', () => {
+  const refuseBad = vi.fn((url: URL) =>
+    url.hostname.endsWith('bad.test') ? { allowed: false, reason: 'listed by threat feed' } : { allowed: true },
+  );
+
+  it('allows a target the SSRF check and the filter both allow, passing the parsed URL', async () => {
+    const verdict = await checkRequestTarget('https://good.test/page?x=1', { requestFilter: refuseBad });
+    expect(verdict).toEqual({ allowed: true });
+    expect(refuseBad).toHaveBeenCalledWith(expect.any(URL));
+    expect((refuseBad.mock.calls[0]?.[0] as URL).href).toBe('https://good.test/page?x=1');
+  });
+
+  it('refuses a target the filter refuses and marks the verdict as filtered', async () => {
+    const verdict = await checkRequestTarget('https://cdn.bad.test/app.js', { requestFilter: refuseBad });
+    expect(verdict).toEqual({ allowed: false, filtered: true, reason: 'listed by threat feed' });
+  });
+
+  it('gives a generic reason when the filter refuses without one', async () => {
+    const verdict = await checkRequestTarget('https://example.com/', { requestFilter: () => ({ allowed: false }) });
+    expect(verdict).toMatchObject({ allowed: false, filtered: true, reason: 'refused by the request filter' });
+  });
+
+  it('treats a thrown error or a rejected promise as a refusal', async () => {
+    const thrown = await checkRequestTarget('https://example.com/', {
+      requestFilter: () => {
+        throw new Error('db down');
+      },
+    });
+    expect(thrown).toMatchObject({ allowed: false, filtered: true });
+    expect(thrown.reason).toContain('db down');
+
+    const rejected = await checkRequestTarget('https://example.com/', {
+      requestFilter: () => Promise.reject(new Error('timeout')),
+    });
+    expect(rejected).toMatchObject({ allowed: false, filtered: true });
+  });
+
+  it('never calls the filter for a target the SSRF check refused', async () => {
+    const filter = vi.fn(() => ({ allowed: true }));
+    const verdict = await checkRequestTarget('http://169.254.169.254/latest/meta-data/', { requestFilter: filter });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.filtered).toBeUndefined();
+    expect(filter).not.toHaveBeenCalled();
+  });
+
+  it('applies the filter with allowPrivateNetworks too', async () => {
+    const verdict = await checkRequestTarget('https://cdn.bad.test/', {
+      allowPrivateNetworks: true,
+      requestFilter: refuseBad,
+    });
+    expect(verdict).toMatchObject({ allowed: false, filtered: true });
+  });
+});
+
 describe('Request Guard — installRequestGuard', () => {
   type FrameKind = 'main' | 'iframe' | 'popup';
 
@@ -419,6 +473,94 @@ describe('Request Guard — installRequestGuard', () => {
     expect(blocked.abort).toHaveBeenCalledWith('blockedbyclient');
     expect(guard.violation?.url).toBe('ftp://127.0.0.1/');
   });
+
+  describe('with a request filter', () => {
+    const requestFilter = (url: URL) =>
+      url.hostname.endsWith('bad.test') ? { allowed: false, reason: 'listed by threat feed' } : { allowed: true };
+
+    it('fails the scan with a filtered violation when the main navigation is refused', async () => {
+      const env = createMockEnv();
+      const guard = await env.install({ requestFilter });
+
+      const route = await env.routeRequest({ url: 'https://www.bad.test/', isNavigation: true });
+
+      expect(route.abort).toHaveBeenCalledWith('blockedbyclient');
+      expect(guard.violation).toEqual({
+        url: 'https://www.bad.test/',
+        reason: 'listed by threat feed',
+        filtered: true,
+      });
+      const error = await guard.assertNoViolation().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BlockedRequestError);
+      expect((error as BlockedRequestError).filtered).toBe(true);
+      expect((error as BlockedRequestError).message).toContain('request filter');
+      expect(guard.filteredRequests).toEqual([]);
+    });
+
+    it('aborts refused subresources, iframes and popups without failing the scan, one entry per host', async () => {
+      const env = createMockEnv();
+      const guard = await env.install({ requestFilter });
+
+      const script = await env.routeRequest({ url: 'https://cdn.bad.test/a.js' });
+      await env.routeRequest({ url: 'https://cdn.bad.test/b.js' });
+      await env.routeRequest({ url: 'https://ads.bad.test/frame', isNavigation: true, frame: 'iframe' });
+      await env.routeRequest({ url: 'https://pop.bad.test/', isNavigation: true, frame: 'popup' });
+      const fine = await env.routeRequest({ url: 'https://cdn.good.test/c.js' });
+
+      expect(script.abort).toHaveBeenCalledWith('blockedbyclient');
+      expect(fine.continue).toHaveBeenCalled();
+      expect(guard.violation).toBeNull();
+      await expect(guard.assertNoViolation()).resolves.toBeUndefined();
+      expect(guard.filteredRequests).toEqual([
+        { host: 'cdn.bad.test', reason: 'listed by threat feed' },
+        { host: 'ads.bad.test', reason: 'listed by threat feed' },
+        { host: 'pop.bad.test', reason: 'listed by threat feed' },
+      ]);
+    });
+
+    it('does not list SSRF refusals as filtered requests', async () => {
+      const env = createMockEnv();
+      const guard = await env.install({ requestFilter });
+
+      await env.routeRequest({ url: 'http://10.0.0.1/pixel.gif' });
+
+      expect(guard.filteredRequests).toEqual([]);
+    });
+
+    it('closes the main page with a filtered violation when a main redirect hop is refused', async () => {
+      const env = createMockEnv();
+      const guard = await env.install({ requestFilter });
+
+      env.emitRequest({ url: 'https://landing.bad.test/', frame: 'main', redirectedFrom: true });
+
+      const error = await guard.assertNoViolation().catch((e: unknown) => e);
+      expect(env.mainPage.close).toHaveBeenCalled();
+      expect((error as BlockedRequestError).filtered).toBe(true);
+    });
+
+    it('closes only the popup and lists the host when a popup redirect hop is refused', async () => {
+      const env = createMockEnv();
+      const guard = await env.install({ requestFilter });
+
+      env.emitRequest({ url: 'https://pop.bad.test/next', frame: 'popup', redirectedFrom: true });
+      await guard.assertNoViolation();
+
+      expect(env.popupPage.close).toHaveBeenCalled();
+      expect(env.mainPage.close).not.toHaveBeenCalled();
+      expect(guard.filteredRequests).toEqual([{ host: 'pop.bad.test', reason: 'listed by threat feed' }]);
+    });
+
+    it('records at most 100 hosts', async () => {
+      const env = createMockEnv();
+      const guard = await env.install({ requestFilter });
+
+      for (let i = 0; i < 120; i++) {
+        await env.routeRequest({ url: `https://h${i}.bad.test/x.js` });
+      }
+
+      expect(guard.filteredRequests).toHaveLength(100);
+    });
+  });
 });
 
 describe('Request Guard — installBrowserRequestGuard', () => {
@@ -496,6 +638,15 @@ describe('Request Guard — installBrowserRequestGuard', () => {
     const fake = fakeBrowserSession();
     await installBrowserRequestGuard(fake.session, mockLogger);
     expect((await fake.pause('https://example.com/'))?.method).toBe('Fetch.failRequest');
+  });
+
+  it('fails a request the request filter refuses, so Lighthouse pages are covered too', async () => {
+    const fake = fakeBrowserSession();
+    await installBrowserRequestGuard(fake.session, mockLogger, {
+      requestFilter: (url) => ({ allowed: !url.hostname.endsWith('bad.test'), reason: 'listed' }),
+    });
+    expect((await fake.pause('https://cdn.bad.test/x.js'))?.method).toBe('Fetch.failRequest');
+    expect((await fake.pause('https://cdn.good.test/x.js'))?.method).toBe('Fetch.continueRequest');
   });
 
   it('lets non-http(s) schemes through without a check', async () => {

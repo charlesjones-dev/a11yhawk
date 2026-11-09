@@ -34,6 +34,7 @@ export type {
   WcagVersion,
 } from './types.js';
 export type { PageAnalysisResult } from './engine/playwright.js';
+export type { FilteredRequest, RequestFilter, RequestFilterVerdict } from './engine/request-guard.js';
 export type {
   LighthouseCategory,
   LighthouseIssue,
