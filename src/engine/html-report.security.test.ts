@@ -45,6 +45,7 @@ function report(overrides: Partial<ScanReport> = {}): ScanReport {
     lighthouse: null,
     usage: null,
     finalUrl: 'https://example.com/',
+    filteredRequests: [],
     durationMs: 10,
     ...overrides,
   };

@@ -43,7 +43,8 @@ import { LlmRequestError, LLMService } from './llm.js';
 import { generateMarkdownFromStructured } from './markdown-generator.js';
 import { PlaywrightService } from './playwright.js';
 import { buildJsonScanPrompt, findWcagCriterion, getWcagCriteria, SCAN_JSON_SYSTEM_PROMPT } from './prompts.js';
-import { BlockedRequestError, checkRequestTarget } from './request-guard.js';
+import { BlockedRequestError, checkRequestFilter, checkRequestTarget } from './request-guard.js';
+import type { FilteredRequest, RequestFilter } from './request-guard.js';
 import { validateUrl } from './url-validator.js';
 
 /**
@@ -72,6 +73,7 @@ export type ScanErrorCode =
   | 'invalid-options'
   | 'invalid-url'
   | 'blocked-request'
+  | 'blocked-by-filter'
   | 'capture-failed'
   | 'lighthouse-failed'
   | 'llm-auth'
@@ -195,6 +197,17 @@ export interface EngineOptions {
    * untrusted users.
    */
   allowPrivateNetworks?: boolean;
+  /**
+   * Host policy for every request the scan browser makes, applied after the SSRF checks
+   * pass: the scan URL (checked before the browser starts), navigations, redirect hops,
+   * subresources, iframes, popups, and Lighthouse's page. Use it to refuse hosts on a
+   * threat block list. A refused scan URL, main-page navigation or main-page redirect fails
+   * the scan with the non-retryable `blocked-by-filter` code; other refused requests are
+   * aborted and listed in `report.filteredRequests`. A thrown error counts as a refusal, so a
+   * filter that should fail open must catch its own errors. Called per request with no
+   * caching. Default: none.
+   */
+  requestFilter?: RequestFilter;
   browser?: {
     /**
      * Launch Chromium with --no-sandbox. The sandbox needs user namespaces, which some
@@ -220,6 +233,11 @@ export interface ScanReport {
   usage: ScanUsage | null;
   /** Guard-validated post-redirect URL that was actually analyzed. */
   finalUrl: string;
+  /**
+   * Hosts `EngineOptions.requestFilter` refused during capture without failing the scan
+   * (subresources, iframes, popups), one entry per host, at most 100. Empty without a filter.
+   */
+  filteredRequests: FilteredRequest[];
   durationMs: number;
 }
 
@@ -539,13 +557,16 @@ export class A11yHawkEngine {
   private readonly logger: Logger;
   private readonly allowPrivateNetworks: boolean;
   private readonly disableSandbox: boolean;
+  private readonly requestFilter: RequestFilter | undefined;
 
   constructor(options: EngineOptions = {}) {
     this.allowPrivateNetworks = options.allowPrivateNetworks ?? false;
     this.disableSandbox = options.browser?.disableSandbox ?? false;
+    this.requestFilter = options.requestFilter;
     this.logger = options.logger ?? createLogger();
     this.playwright = new PlaywrightService({
       allowPrivateNetworks: this.allowPrivateNetworks,
+      requestFilter: this.requestFilter,
       disableSandbox: this.disableSandbox,
       debug: options.browser?.debug ?? false,
     });
@@ -633,6 +654,19 @@ export class A11yHawkEngine {
           throw new ScanError('invalid-url', `Scan URL failed security validation: ${validation.error}`, false);
         }
       }
+      // The host's request filter decides on the scan URL before any browser work, so a
+      // refused site never loads. The guards apply it again to every request.
+      if (this.requestFilter) {
+        const filterVerdict = await checkRequestFilter(url, this.requestFilter);
+        if (!filterVerdict.allowed) {
+          log.warn('Scan URL refused by the request filter', { reason: filterVerdict.reason });
+          throw new ScanError(
+            'blocked-by-filter',
+            `Scan URL was blocked by the request filter: ${filterVerdict.reason}`,
+            false,
+          );
+        }
+      }
       // Checked before any browser work so a refused endpoint fails fast and is not
       // retried. LLMService's guarded agent re-checks every connection at request time.
       if (options.llm?.baseUrl !== undefined) {
@@ -659,7 +693,8 @@ export class A11yHawkEngine {
           // A blocked navigation or redirect is an attack or misconfiguration,
           // not a transient failure.
           if (error instanceof BlockedRequestError) {
-            throw new ScanError('blocked-request', error.message, false, { cause: error });
+            const code = error.filtered ? 'blocked-by-filter' : 'blocked-request';
+            throw new ScanError(code, error.message, false, { cause: error });
           }
           throw new ScanError(
             'capture-failed',
@@ -873,6 +908,7 @@ export class A11yHawkEngine {
         lighthouse: lighthouseResult,
         usage,
         finalUrl: pageData.finalUrl || url,
+        filteredRequests: pageData.filteredRequests,
         durationMs,
       };
     } catch (error) {

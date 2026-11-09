@@ -22,6 +22,8 @@ const state = vi.hoisted(() => ({
   analyzePageCalls: 0,
   content: '',
   aRecords: ['93.184.216.34'],
+  filteredRequests: [] as Array<{ host: string; reason: string }>,
+  captureError: null as null | Error,
 }));
 
 vi.mock('dns/promises', () => ({
@@ -43,6 +45,7 @@ vi.mock('./playwright.js', () => ({
     }
     async analyzePage() {
       state.analyzePageCalls += 1;
+      if (state.captureError) throw state.captureError;
       return {
         title: 'Page',
         screenshotBuffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
@@ -50,6 +53,7 @@ vi.mock('./playwright.js', () => ({
         accessibilityTree: { role: 'WebArea', children: [] },
         html: '<html><body><p>page</p></body></html>',
         finalUrl: 'https://scan-target.test/',
+        filteredRequests: state.filteredRequests,
       };
     }
     async resolveElementBoundingBoxes() {
@@ -69,6 +73,7 @@ vi.mock('./llm.js', () => ({
 import { failsThreshold } from '../cli/main.js';
 import type { Logger } from '../logger/index.js';
 import { renderHtmlReport } from './html-report.js';
+import { BlockedRequestError } from './request-guard.js';
 import { A11yHawkEngine, ScanError } from './scan.js';
 
 const silent: Logger = {
@@ -89,6 +94,8 @@ beforeEach(() => {
   state.analyzePageCalls = 0;
   state.content = DEFAULT_CONTENT;
   state.aRecords = ['93.184.216.34'];
+  state.filteredRequests = [];
+  state.captureError = null;
 });
 
 describe('llm.baseUrl guard', () => {
@@ -275,5 +282,103 @@ describe('scan URL validation errors', () => {
     expect((error as ScanError).code).toBe('invalid-url');
     expect((error as ScanError).message).not.toContain('10.20.30.40');
     expect(state.analyzePageCalls).toBe(0);
+  });
+});
+
+describe('request filter', () => {
+  it('refuses a filtered scan URL with a non-retryable blocked-by-filter error before any browser work', async () => {
+    const seen: string[] = [];
+    const engine = new A11yHawkEngine({
+      logger: silent,
+      requestFilter: (url) => {
+        seen.push(url.hostname);
+        return { allowed: false, reason: 'listed by threat feed' };
+      },
+    });
+
+    const error = await engine
+      .scan(SCAN_URL, { lighthouse: false, llm: { apiKey: 'k' }, logger: silent })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ScanError);
+    expect((error as ScanError).code).toBe('blocked-by-filter');
+    expect((error as ScanError).retryable).toBe(false);
+    expect((error as ScanError).message).toContain('listed by threat feed');
+    expect(seen).toEqual(['scan-target.test']);
+    expect(state.analyzePageCalls).toBe(0);
+  });
+
+  it('treats a throwing filter as a refusal', async () => {
+    const engine = new A11yHawkEngine({
+      logger: silent,
+      requestFilter: () => {
+        throw new Error('lookup down');
+      },
+    });
+
+    const error = await engine
+      .scan(SCAN_URL, { lighthouse: false, llm: { apiKey: 'k' }, logger: silent })
+      .catch((e: unknown) => e);
+
+    expect((error as ScanError).code).toBe('blocked-by-filter');
+    expect(state.analyzePageCalls).toBe(0);
+  });
+
+  it('does not run the filter on a scan URL the SSRF check refused', async () => {
+    state.aRecords = ['10.20.30.40'];
+    let calls = 0;
+    const engine = new A11yHawkEngine({
+      logger: silent,
+      requestFilter: () => {
+        calls += 1;
+        return { allowed: true };
+      },
+    });
+
+    const error = await engine
+      .scan('https://intranet.test/', { lighthouse: false, llm: { apiKey: 'k' }, logger: silent })
+      .catch((e: unknown) => e);
+
+    expect((error as ScanError).code).toBe('invalid-url');
+    expect(calls).toBe(0);
+  });
+
+  it('maps a filtered main-page block during capture to blocked-by-filter', async () => {
+    state.captureError = new BlockedRequestError('Request to https://bad.test/ was blocked by the request filter: x', {
+      filtered: true,
+    });
+    const engine = new A11yHawkEngine({ logger: silent, requestFilter: () => ({ allowed: true }) });
+
+    const error = await engine
+      .scan(SCAN_URL, { lighthouse: false, llm: { apiKey: 'k' }, logger: silent })
+      .catch((e: unknown) => e);
+
+    expect((error as ScanError).code).toBe('blocked-by-filter');
+    expect((error as ScanError).retryable).toBe(false);
+  });
+
+  it('keeps blocked-request for an SSRF block during capture', async () => {
+    state.captureError = new BlockedRequestError('Request to http://10.0.0.1/ was blocked for security reasons: x');
+    const engine = new A11yHawkEngine({ logger: silent });
+
+    const error = await engine
+      .scan(SCAN_URL, { lighthouse: false, llm: { apiKey: 'k' }, logger: silent })
+      .catch((e: unknown) => e);
+
+    expect((error as ScanError).code).toBe('blocked-request');
+  });
+
+  it('lists the hosts the filter refused during capture in the report', async () => {
+    state.filteredRequests = [{ host: 'cdn.bad.test', reason: 'listed by threat feed' }];
+    const engine = new A11yHawkEngine({ logger: silent, requestFilter: () => ({ allowed: true }) });
+
+    const report = await engine.scan(SCAN_URL, {
+      lighthouse: false,
+      annotate: false,
+      llm: { apiKey: 'k' },
+      logger: silent,
+    });
+
+    expect(report.filteredRequests).toEqual([{ host: 'cdn.bad.test', reason: 'listed by threat feed' }]);
   });
 });

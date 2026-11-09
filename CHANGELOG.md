@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 > **Pre-1.0 versioning.** While a11yhawk is in `0.x`, the public API is still stabilizing: breaking changes may ride minor version bumps (for example `0.1.0` to `0.2.0`) up until `1.0.0`. Patch releases (`0.1.0` to `0.1.1`) stay backward compatible. If you depend on the API surface, pin a minor range. `1.0.0` ships once the API has stabilized against real adoption.
 
+## [0.9.0] - 2026-11-08
+
+### Added
+
+- **Request filter.** `EngineOptions.requestFilter` is your own host policy for every request the scan browser makes: the scan URL (checked before the browser starts), navigations, redirect hops, subresources, iframes, popups, and Lighthouse's page. It runs after the SSRF checks pass, so it can only refuse more. Use it to refuse sites on a malware or phishing block list. A thrown error counts as a refusal. See [Request filter](README.md#request-filter).
+- **`blocked-by-filter` error code.** A scan fails with it, non-retryable, when the filter refuses the scan URL, the main page's navigation, or a main-page redirect. SSRF blocks keep `blocked-request`.
+- **`report.filteredRequests`.** The hosts the filter refused during capture without failing the scan, one `{ host, reason }` per host, at most 100. Always an empty array without a filter.
+- `BlockedRequestError` has a `filtered` flag, and `RequestFilter`, `RequestFilterVerdict` and `FilteredRequest` are exported types.
+
+### Changed
+
+- `ScanReport` has the new required `filteredRequests` field. Code that builds `ScanReport` objects itself, such as test fixtures, must add `filteredRequests: []`. A total `Record<ScanErrorCode, ...>` map needs a `blocked-by-filter` entry.
+
 ## [0.8.2] - 2026-11-05
 
 ### Security

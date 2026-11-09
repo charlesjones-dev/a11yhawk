@@ -26,6 +26,9 @@
  * port, are covered by installBrowserRequestGuard, which intercepts every request in the
  * browser (redirect hops included, before they are sent).
  *
+ * Both guards also apply the host's optional request filter (RequestFilter) to every request
+ * the SSRF checks allow, so a host can refuse block-listed sites in the same places.
+ *
  * Residual risk: WebSocket connections are intercepted by neither guard, and Chromium
  * resolves hostnames itself after the guard's own lookup, which leaves a short DNS-rebinding
  * window. Blocking non-public egress at the network layer is the only complete fix.
@@ -47,11 +50,19 @@ import type { BrowserContext, CDPSession, Page, Request } from 'playwright';
 import { validateUrlSync, isPrivateIpAddress } from './url-validator.js';
 import type { Logger } from '../logger/index.js';
 
-/** Thrown when a scan is aborted because the page tried to reach a private/internal target. */
+/**
+ * Thrown when a scan is aborted because the main page tried to reach a refused target: a
+ * private/internal address, or (with `filtered` set) a target the host's request filter
+ * refused.
+ */
 export class BlockedRequestError extends Error {
-  constructor(message: string) {
+  /** True when the host's request filter, not the SSRF check, refused the target. */
+  readonly filtered: boolean;
+
+  constructor(message: string, options: { filtered?: boolean } = {}) {
     super(message);
     this.name = 'BlockedRequestError';
+    this.filtered = options.filtered ?? false;
   }
 }
 
@@ -61,7 +72,40 @@ export interface TargetVerdict {
   reason?: string;
   /** The private address a hostname resolved to, for logs only. */
   resolvedAddress?: string;
+  /** True when the host's request filter, not the SSRF check, refused the target. */
+  filtered?: boolean;
 }
+
+/** What a request filter decided about one request. */
+export interface RequestFilterVerdict {
+  allowed: boolean;
+  /** Why the request was refused. Reaches logs and, for the scan URL, the scan's error message. */
+  reason?: string;
+}
+
+/**
+ * A host-supplied policy check for every request the scan browser makes: the scan URL,
+ * navigations, redirect hops, subresources, iframes, popups and Lighthouse's own page. It
+ * runs only after the SSRF checks have passed, so it can only refuse more, never less. Use it
+ * to refuse hosts on a threat block list.
+ *
+ * The guard calls it once per request (twice for capture pages, which both the context and
+ * the browser-wide guard see) and caches nothing, so cache expensive lookups inside the
+ * filter. A thrown error or rejected promise counts as a refusal: a filter that should fail
+ * open must catch its own errors.
+ */
+export type RequestFilter = (url: URL) => RequestFilterVerdict | Promise<RequestFilterVerdict>;
+
+/** A host the request filter refused during capture, for the scan report. */
+export interface FilteredRequest {
+  /** Lowercased hostname of the refused request. */
+  host: string;
+  /** The filter's reason for the first refused request to this host. */
+  reason: string;
+}
+
+/** Most distinct hosts a guard records in `filteredRequests`. */
+const MAX_FILTERED_HOSTS = 100;
 
 /**
  * Options shared by the request guard and its lower-level target check.
@@ -77,6 +121,11 @@ export interface RequestGuardOptions {
    * identical to a guard that never saw this option.
    */
   allowPrivateNetworks?: boolean;
+  /**
+   * Host policy applied after the SSRF checks pass; see RequestFilter. Without it, the guard's
+   * decisions are exactly those of a guard that never saw this option.
+   */
+  requestFilter?: RequestFilter;
 }
 
 // In-flight lookup de-duplication. We deliberately do NOT cache a resolved verdict across
@@ -144,17 +193,46 @@ function resolveHostVerdict(hostname: string, allowPrivateNetworks: boolean): Pr
 }
 
 /**
+ * Run a request filter on one URL. A throw or rejection counts as a refusal (see
+ * RequestFilter). The refusal reason is the filter's, or a generic one when it gave none.
+ */
+export async function checkRequestFilter(rawUrl: string, requestFilter: RequestFilter): Promise<TargetVerdict> {
+  let verdict: RequestFilterVerdict;
+  try {
+    verdict = await requestFilter(new URL(rawUrl));
+  } catch (error) {
+    return {
+      allowed: false,
+      filtered: true,
+      reason: `request filter error (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (verdict.allowed) {
+    return { allowed: true };
+  }
+  return { allowed: false, filtered: true, reason: verdict.reason || 'refused by the request filter' };
+}
+
+/**
  * Decide whether the browser may fetch the given URL.
  * Combines the structural SSRF checks from the shared validator with a fetch-time
- * DNS check so a rebound hostname is caught at the moment it matters.
+ * DNS check so a rebound hostname is caught at the moment it matters, then applies the
+ * host's request filter, if any, to a target the SSRF checks allowed.
  *
  * With `allowPrivateNetworks` set, the private-address blocking is intentionally lifted
  * (both the structural check and the DNS verdict), while scheme validation and per-request
  * DNS resolution stay active; see RequestGuardOptions.
  */
 export async function checkRequestTarget(rawUrl: string, options: RequestGuardOptions = {}): Promise<TargetVerdict> {
-  const { allowPrivateNetworks = false } = options;
+  const verdict = await checkSsrfTarget(rawUrl, options.allowPrivateNetworks ?? false);
+  if (!verdict.allowed || !options.requestFilter) {
+    return verdict;
+  }
+  return checkRequestFilter(rawUrl, options.requestFilter);
+}
 
+/** The SSRF half of checkRequestTarget: scheme, structural and fetch-time DNS checks. */
+async function checkSsrfTarget(rawUrl: string, allowPrivateNetworks: boolean): Promise<TargetVerdict> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -201,7 +279,12 @@ export async function checkRequestTarget(rawUrl: string, options: RequestGuardOp
 
 export interface RequestGuard {
   /** First request that triggered a scan-fatal block (main page only), if any. */
-  readonly violation: { url: string; reason: string } | null;
+  readonly violation: { url: string; reason: string; filtered: boolean } | null;
+  /**
+   * Hosts the request filter refused without failing the scan (subresources, iframes,
+   * popups), one entry per host, in the order first seen. At most 100 hosts.
+   */
+  readonly filteredRequests: readonly FilteredRequest[];
   /**
    * Drain any in-flight redirect-hop validations, then throw BlockedRequestError if a
    * scan-fatal violation was recorded. Async because redirect checks run a DNS lookup off
@@ -233,13 +316,30 @@ export async function installRequestGuard(
   log: Logger,
   options: RequestGuardOptions = {},
 ): Promise<RequestGuard> {
-  const { allowPrivateNetworks = false } = options;
-  let violation: { url: string; reason: string } | null = null;
+  const { allowPrivateNetworks = false, requestFilter } = options;
+  let violation: { url: string; reason: string; filtered: boolean } | null = null;
   const pendingRedirectChecks: Promise<void>[] = [];
+  const filteredRequests: FilteredRequest[] = [];
 
-  const recordViolation = (url: string, reason: string) => {
+  const recordViolation = (url: string, verdict: TargetVerdict) => {
     if (!violation) {
-      violation = { url, reason };
+      violation = { url, reason: verdict.reason ?? 'blocked by request guard', filtered: verdict.filtered ?? false };
+    }
+  };
+
+  // Non-fatal filter refusals, for the scan report. SSRF refusals are not recorded here.
+  const recordFiltered = (url: string, verdict: TargetVerdict) => {
+    if (!verdict.filtered || filteredRequests.length >= MAX_FILTERED_HOSTS) {
+      return;
+    }
+    let host: string;
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return;
+    }
+    if (!filteredRequests.some((entry) => entry.host === host)) {
+      filteredRequests.push({ host, reason: verdict.reason ?? 'refused by the request filter' });
     }
   };
 
@@ -259,7 +359,7 @@ export async function installRequestGuard(
 
     let verdict: TargetVerdict;
     try {
-      verdict = await checkRequestTarget(url, { allowPrivateNetworks });
+      verdict = await checkRequestTarget(url, { allowPrivateNetworks, requestFilter });
     } catch (error) {
       verdict = {
         allowed: false,
@@ -274,13 +374,24 @@ export async function installRequestGuard(
       }
 
       const reason = verdict.reason ?? 'blocked by request guard';
-      const { resolvedAddress } = verdict;
+      const { resolvedAddress, filtered = false } = verdict;
       if (request.isNavigationRequest() && isMainFrameRequest(request)) {
-        recordViolation(url, reason);
-        log.warn('Blocked main-frame navigation to disallowed target', { blockedUrl: url, reason, resolvedAddress });
+        recordViolation(url, verdict);
+        log.warn('Blocked main-frame navigation to disallowed target', {
+          blockedUrl: url,
+          reason,
+          resolvedAddress,
+          filtered,
+        });
       } else {
         // Subresource, iframe, or popup navigation - abort the request, keep scanning.
-        log.warn('Blocked non-main request to disallowed target', { blockedUrl: url, reason, resolvedAddress });
+        recordFiltered(url, verdict);
+        log.warn('Blocked non-main request to disallowed target', {
+          blockedUrl: url,
+          reason,
+          resolvedAddress,
+          filtered,
+        });
       }
       await route.abort('blockedbyclient');
     } catch {
@@ -300,19 +411,22 @@ export async function installRequestGuard(
     }
 
     const url = request.url();
-    const check = checkRequestTarget(url, { allowPrivateNetworks })
+    const check = checkRequestTarget(url, { allowPrivateNetworks, requestFilter })
       .then(async (verdict) => {
         if (verdict.allowed) {
           return;
         }
         const reason = verdict.reason ?? 'blocked by request guard';
         if (isMainFrameRequest(request)) {
-          recordViolation(url, reason);
+          recordViolation(url, verdict);
+        } else {
+          recordFiltered(url, verdict);
         }
         log.warn('Redirect to disallowed target - closing page', {
           blockedUrl: url,
           reason,
           resolvedAddress: verdict.resolvedAddress,
+          filtered: verdict.filtered ?? false,
         });
 
         let offendingPage: Page | null;
@@ -331,9 +445,18 @@ export async function installRequestGuard(
     get violation() {
       return violation;
     },
+    get filteredRequests() {
+      return filteredRequests;
+    },
     async assertNoViolation() {
       // Drain redirect-hop validations before trusting that no violation occurred.
       await Promise.allSettled(pendingRedirectChecks);
+      if (violation?.filtered) {
+        throw new BlockedRequestError(
+          `Request to ${violation.url} was blocked by the request filter: ${violation.reason}`,
+          { filtered: true },
+        );
+      }
       if (violation) {
         throw new BlockedRequestError(
           `Request to ${violation.url} was blocked for security reasons: ${violation.reason}`,
@@ -354,14 +477,20 @@ export async function installRequestGuard(
  * Context routes see each request first, so for capture and annotation pages this repeats
  * the context guard's check and leaves its violation handling unchanged. Only http(s) is
  * checked; other schemes never reach the network from a page. WebSocket connections are not
- * intercepted here either. Install only in the default posture.
+ * intercepted here either. Install only in the default posture. `options.requestFilter`, when
+ * set, applies to every request here too, so it also covers Lighthouse's page.
  */
-export async function installBrowserRequestGuard(session: CDPSession, log: Logger): Promise<void> {
+export async function installBrowserRequestGuard(
+  session: CDPSession,
+  log: Logger,
+  options: Pick<RequestGuardOptions, 'requestFilter'> = {},
+): Promise<void> {
+  const { requestFilter } = options;
   session.on('Fetch.requestPaused', ({ requestId, request }) => {
     const url = request.url;
     const isHttp = url.startsWith('http:') || url.startsWith('https:');
     const check: Promise<TargetVerdict> = isHttp
-      ? checkRequestTarget(url).catch((error: unknown) => ({
+      ? checkRequestTarget(url, { requestFilter }).catch((error: unknown) => ({
           allowed: false,
           reason: `request guard error (${error instanceof Error ? error.message : String(error)})`,
         }))
@@ -377,6 +506,7 @@ export async function installBrowserRequestGuard(session: CDPSession, log: Logge
           blockedUrl: url,
           reason: verdict.reason,
           resolvedAddress: verdict.resolvedAddress,
+          filtered: verdict.filtered ?? false,
         });
         await session.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' });
       })
